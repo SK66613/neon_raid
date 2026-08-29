@@ -1,0 +1,70 @@
+NEON RAID TWO-STAGE v0.5 TEST REPORT
+
+JavaScript syntax: PASS (node --check)
+browser_errors_zero: PASS
+stage1_loaded: PASS
+movement_works: PASS
+stage1_fire_works: PASS
+automatic_transition_to_stage2: PASS
+boss_fire_damages_boss: PASS
+
+Browser page errors: []
+
+State snapshots:
+{
+  "initial": {
+    "stage": 1,
+    "x": 180,
+    "y": 460,
+    "ammo": 28,
+    "bossHp": 1200,
+    "kills": 0,
+    "paused": false,
+    "dead": false,
+    "won": false
+  },
+  "after_move": {
+    "stage": 1,
+    "x": 195.58987799273007,
+    "y": 460,
+    "ammo": 28,
+    "bossHp": 1200,
+    "kills": 0,
+    "paused": false,
+    "dead": false,
+    "won": false
+  },
+  "after_stage1_fire": {
+    "stage": 1,
+    "x": 197.49677739848568,
+    "y": 460,
+    "ammo": 25,
+    "bossHp": 1200,
+    "kills": 1,
+    "paused": false,
+    "dead": false,
+    "won": false
+  },
+  "after_transition": {
+    "stage": 2,
+    "x": 180,
+    "y": 468,
+    "ammo": 25,
+    "bossHp": 1200,
+    "kills": 6,
+    "paused": false,
+    "dead": false,
+    "won": false
+  },
+  "after_boss_fire": {
+    "stage": 2,
+    "x": 180,
+    "y": 468,
+    "ammo": 21,
+    "bossHp": 1183,
+    "kills": 6,
+    "paused": false,
+    "dead": false,
+    "won": false
+  }
+}

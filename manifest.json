@@ -1,0 +1,32 @@
+{
+  "version": "0.5",
+  "directions": [
+    "n",
+    "ne",
+    "e",
+    "se",
+    "s",
+    "sw",
+    "w",
+    "nw"
+  ],
+  "player_states": [
+    "idle",
+    "run1",
+    "run2"
+  ],
+  "enemy_states": [
+    "idle",
+    "run1",
+    "run2"
+  ],
+  "boss_frames": {
+    "idle": 4,
+    "attack": 4
+  },
+  "stages": [
+    "Corp Sec sector",
+    "Warden-X reactor boss"
+  ],
+  "offline_standalone": true
+}
