@@ -1,0 +1,37 @@
+name: Client CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Validate source and assets
+        run: |
+          npm run check
+          node --check src/main.js
+          node --check src/game/Game.js
+          node --check src/game/assets.js
+          node --check scripts/verify-assets.mjs
+          node --check scripts/verify-build.mjs
+          node --check tests/smoke.spec.js
+      - name: Build client
+        run: npm run build
+      - name: Validate production output
+        run: npm run verify:build
+      - name: Smoke test Chromium
+        run: npm run test:smoke

@@ -28,5 +28,5 @@
     "Corp Sec sector",
     "Warden-X reactor boss"
   ],
-  "offline_standalone": true
+  "offline_standalone": false
 }
