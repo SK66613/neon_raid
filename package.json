@@ -10,7 +10,8 @@
     "check": "node scripts/verify-assets.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "test:smoke": "playwright test",
-    "test:simulation": "node --test tests/simulation.test.js"
+    "test:simulation": "node --test tests/simulation.test.js",
+    "test:session": "node --test tests/session.test.js"
   },
   "devDependencies": {
     "vite": "7.1.3",

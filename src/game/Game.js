@@ -1,6 +1,6 @@
 import { DIRS, PLAYER_ASSETS, CORP_SEC_ASSETS, WARDEN_X_IDLE_ASSETS, WARDEN_X_ATTACK_ASSETS, ENVIRONMENT_ASSETS } from './assets.js';
-import { GameSimulation } from './simulation/GameSimulation.js';
 import { CommandType, fireCommand, moveCommand } from './simulation/commands.js';
+import { createLocalGameSession } from './session/LocalGameSession.js';
 
 export function startGame() {
   const canvas = document.getElementById('game');
@@ -21,14 +21,15 @@ export function startGame() {
   Promise.all(sources.map(([source, assign]) => new Promise(resolve => { const image = new Image(); image.onload = image.onerror = () => { assign(image); resolve(); }; image.src = source; }))).then(run);
 
   function run() {
-    const simulation = new GameSimulation();
+    const session = createLocalGameSession();
+    const testAdapter = session.createTestAdapter();
     const keys = { up: false, down: false, left: false, right: false };
     const visual = { time: 0, shake: 0, muzzle: 0, bossFlash: 0, particles: [], casings: [], rain: [], last: 0 };
     let audioContext = null;
     for (let i = 0; i < 70; i++) visual.rain.push({ x: Math.random()*360, y: Math.random()*540, speed: 70+Math.random()*100, length: 5+Math.random()*9, alpha: .08+Math.random()*.16 });
     const audio = () => { if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)(); return audioContext; };
     const tone = (frequency, duration=.04, type='square', gain=.02) => { try { const a=audio(),o=a.createOscillator(),g=a.createGain();o.type=type;o.frequency.value=frequency;g.gain.setValueAtTime(gain,a.currentTime);g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+duration);o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+duration); } catch {} };
-    const command = value => simulation.step(0, [value]);
+    const command = value => session.submit(value);
     const movement = () => moveCommand((keys.right?1:0)-(keys.left?1:0), (keys.down?1:0)-(keys.up?1:0));
 
     function effects(events) {
@@ -45,7 +46,7 @@ export function startGame() {
         if (event.type === 'sector-cleared') ui.status.textContent = 'SECTOR CLEAR — доступ к реактору открыт.';
         if (event.type === 'boss-started') ui.status.textContent = 'Этап 2: Warden-X ожил. Следи за красными зонами и паттернами пуль.';
         if (event.type === 'reload-started') { ui.status.textContent = 'RELOADING…'; tone(320,.05,'square',.012); }
-        if (event.type === 'reload-completed') { const snapshot=simulation.getSnapshot();ui.status.textContent=snapshot.stage===1?'Сектор активен.':`Warden-X: ${Math.ceil(snapshot.boss.hp)} HP`; }
+        if (event.type === 'reload-completed') { const snapshot=session.getSnapshot();ui.status.textContent=snapshot.stage===1?'Сектор активен.':`Warden-X: ${Math.ceil(snapshot.boss.hp)} HP`; }
         if (event.type === 'medkit-collected') ui.status.textContent = '+32 HP';
         if (event.type === 'player-died') ui.status.textContent = 'RAID FAILED — нажми RESTART GAME';
         if (event.type === 'boss-defeated') ui.status.textContent = 'WARDEN-X DESTROYED — TWO-STAGE RAID COMPLETE';
@@ -77,13 +78,13 @@ export function startGame() {
       if(s.transitionTimer>0){ctx.fillStyle='rgba(0,0,0,.62)';ctx.fillRect(40,224,280,88);ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='bold 18px monospace';ctx.fillText('SECTOR CLEAR',180,258);ctx.fillStyle='#35d8e2';ctx.font='9px monospace';ctx.fillText('ENTERING REACTOR CORE…',180,283);ctx.textAlign='left'}
       if(s.paused){ctx.fillStyle='rgba(0,0,0,.62)';ctx.fillRect(45,226,270,92);ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='bold 18px monospace';ctx.fillText(s.won?'RAID COMPLETE':s.dead?'RAID FAILED':'PAUSED',180,260);ctx.font='9px monospace';ctx.fillStyle='#a3b5bd';ctx.fillText(s.won?'WARDEN-X DESTROYED':s.dead?'RESTART GAME':'PRESS PLAY',180,285);ctx.textAlign='left'}
     }
-    function loop(timestamp) { const dt=Math.min(.033,(timestamp-visual.last)/1000||0);visual.last=timestamp;visual.time+=dt;visual.shake=Math.max(0,visual.shake-dt*17);visual.muzzle=Math.max(0,visual.muzzle-dt);visual.bossFlash=Math.max(0,visual.bossFlash-dt);for(const casing of visual.casings){casing.vy+=90*dt;casing.x+=casing.vx*dt;casing.y+=casing.vy*dt;casing.life-=dt}visual.casings=visual.casings.filter(casing=>casing.life>0);for(const r of visual.rain){r.y+=r.speed*dt;r.x-=r.speed*.18*dt;if(r.y>550){r.y=-10;r.x=Math.random()*360}if(r.x<-10)r.x=370}for(const particle of visual.particles){particle.life-=dt;if(particle.type!=='smoke')particle.r=(particle.r||4)+((particle.radius||particle.max||28)-(particle.r||4))*Math.min(1,dt*12);else particle.r+=(particle.max-particle.r)*Math.min(1,dt*12)}visual.particles=visual.particles.filter(particle=>particle.life>0);simulation.step(dt,[movement()]);const snapshot=simulation.getSnapshot();effects(simulation.drainEvents());sync(snapshot);draw(snapshot);requestAnimationFrame(loop); }
+    function loop(timestamp) { const dt=Math.min(.033,(timestamp-visual.last)/1000||0);visual.last=timestamp;visual.time+=dt;visual.shake=Math.max(0,visual.shake-dt*17);visual.muzzle=Math.max(0,visual.muzzle-dt);visual.bossFlash=Math.max(0,visual.bossFlash-dt);for(const casing of visual.casings){casing.vy+=90*dt;casing.x+=casing.vx*dt;casing.y+=casing.vy*dt;casing.life-=dt}visual.casings=visual.casings.filter(casing=>casing.life>0);for(const r of visual.rain){r.y+=r.speed*dt;r.x-=r.speed*.18*dt;if(r.y>550){r.y=-10;r.x=Math.random()*360}if(r.x<-10)r.x=370}for(const particle of visual.particles){particle.life-=dt;if(particle.type!=='smoke')particle.r=(particle.r||4)+((particle.radius||particle.max||28)-(particle.r||4))*Math.min(1,dt*12);else particle.r+=(particle.max-particle.r)*Math.min(1,dt*12)}visual.particles=visual.particles.filter(particle=>particle.life>0);session.submit(movement());session.update(dt);const snapshot=session.getSnapshot();effects(session.drainEvents());sync(snapshot);draw(snapshot);requestAnimationFrame(loop); }
     document.querySelectorAll('[data-dir]').forEach(button => { const key=button.dataset.dir,on=e=>{e.preventDefault();audio();keys[key]=true;button.classList.add('on')},off=e=>{e?.preventDefault();keys[key]=false;button.classList.remove('on')};button.addEventListener('pointerdown',on);for(const name of ['pointerup','pointercancel','pointerleave'])button.addEventListener(name,off);});
     const fire=document.getElementById('fire'),fireOn=e=>{e.preventDefault();audio();command(fireCommand(true));fire.classList.add('on')},fireOff=e=>{e?.preventDefault();command(fireCommand(false));fire.classList.remove('on')};fire.addEventListener('pointerdown',fireOn);for(const name of ['pointerup','pointercancel','pointerleave'])fire.addEventListener(name,fireOff);
     document.getElementById('dash').addEventListener('click',()=>command({type:CommandType.DASH}));document.getElementById('grenade').addEventListener('click',()=>command({type:CommandType.GRENADE}));document.getElementById('pause').addEventListener('click',()=>command({type:CommandType.PAUSE}));document.getElementById('reset').addEventListener('click',()=>command({type:CommandType.RESTART}));
     document.addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k==='w'||e.key==='ArrowUp')keys.up=true;if(k==='s'||e.key==='ArrowDown')keys.down=true;if(k==='a'||e.key==='ArrowLeft')keys.left=true;if(k==='d'||e.key==='ArrowRight')keys.right=true;if(e.code==='Space'){command(fireCommand(true));e.preventDefault()}if(k==='g')command({type:CommandType.GRENADE});if(e.key==='Shift')command({type:CommandType.DASH});});document.addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='w'||e.key==='ArrowUp')keys.up=false;if(k==='s'||e.key==='ArrowDown')keys.down=false;if(k==='a'||e.key==='ArrowLeft')keys.left=false;if(k==='d'||e.key==='ArrowRight')keys.right=false;if(e.code==='Space')command(fireCommand(false));});
-    window.addEventListener('blur',()=>{command(fireCommand(false));const s=simulation.getSnapshot();if(!s.paused&&!s.dead&&!s.won)command({type:CommandType.PAUSE});});
-    window.__NEON_TEST={get:()=>{const s=simulation.getSnapshot();return{stage:s.stage,x:s.player.x,y:s.player.y,ammo:s.player.ammo,bossHp:s.boss.hp,kills:s.kills,paused:s.paused,dead:s.dead,won:s.won}},skipToBoss:()=>simulation.skipToBoss(),completeStage1:()=>simulation.completeStageOne(),damageBoss:(n=100)=>simulation.damageBoss(n),reload:()=>simulation.step(0,[fireCommand(false),{type:CommandType.RELOAD}])};
+    window.addEventListener('blur',()=>{command(fireCommand(false));const s=session.getSnapshot();if(!s.paused&&!s.dead&&!s.won)command({type:CommandType.PAUSE});});
+    window.__NEON_TEST={get:()=>{const s=session.getSnapshot();return{stage:s.stage,x:s.player.x,y:s.player.y,ammo:s.player.ammo,bossHp:s.boss.hp,kills:s.kills,paused:s.paused,dead:s.dead,won:s.won}},skipToBoss:()=>testAdapter.skipToBoss(),completeStage1:()=>testAdapter.completeStageOne(),damageBoss:(n=100)=>testAdapter.damageBoss(n),reload:()=>{session.submit(fireCommand(false));session.submit({type:CommandType.RELOAD});session.update(0)}};
     ui.status.textContent='Этап 1: первая группа Corp Sec. Укрытия блокируют пули.';window.__NEON_READY=true;requestAnimationFrame(loop);
   }
 }
