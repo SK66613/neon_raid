@@ -11,6 +11,10 @@ test('v0.5 boots, plays Stage 1, and enters the Warden-X fight', async ({ page }
   const initial = await page.evaluate(() => window.__NEON_TEST.get());
   expect(initial.stage).toBe(1);
 
+  await page.locator('#reset').click();
+  await expect(page.locator('#status')).toContainText('первая группа Corp Sec');
+  await expect(page.locator('#status')).not.toContainText('Вторая группа');
+
   await page.keyboard.down('ArrowUp');
   await page.waitForTimeout(250);
   await page.keyboard.up('ArrowUp');
@@ -19,6 +23,10 @@ test('v0.5 boots, plays Stage 1, and enters the Warden-X fight', async ({ page }
   await page.keyboard.press('Space');
   await expect.poll(() => page.evaluate(() => window.__NEON_TEST.get().ammo)).toBeLessThan(initial.ammo);
   expect(await page.evaluate(() => window.__NEON_TEST.get().dead)).toBe(false);
+
+  await page.evaluate(() => window.__NEON_TEST.reload());
+  await expect(page.locator('#status')).toContainText('RELOADING');
+  await expect(page.locator('#status')).toHaveText('Сектор активен.', { timeout: 2_000 });
 
   await page.evaluate(() => window.__NEON_TEST.skipToBoss());
   const bossStart = await page.evaluate(() => window.__NEON_TEST.get());
