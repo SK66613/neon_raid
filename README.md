@@ -1,44 +1,39 @@
 # NEON RAID — Two Stage Build v0.5
 
-NEON RAID is a vanilla JavaScript and Canvas two-stage action prototype. This client-foundation refactor intentionally preserves the v0.5 gameplay: the Corp Sec sector, its two enemy waves, and the three-phase Warden-X reactor fight.
+NEON RAID is a vanilla JavaScript and Canvas two-stage action prototype. This refactor preserves the v0.5 Corp Sec sector, two enemy waves, and three-phase Warden-X fight while separating browser presentation from canonical gameplay.
 
 ## Architecture
 
-- `index.html` — small document shell containing the HUD, canvas, controls, and module entrypoint.
-- `src/main.js` — client bootstrap.
-- `src/styles.css` — application presentation and responsive mobile controls.
-- `src/game/Game.js` — existing v0.5 rendering, input, audio, and gameplay runtime. Keeping the runtime together makes this extraction reviewable; simulation separation belongs in a later change.
-- `src/game/assets.js` — canonical logical asset manifest and runtime URL maps.
-- `src/game/config.js` — stable client metadata and canvas dimensions for future extraction work.
-- `public/assets/` — canonical image files served unchanged by Vite.
-- `scripts/verify-assets.mjs` — validates declared files, unique logical keys, directional actors, Warden-X frames, and the absence of embedded image payloads.
-- `manifest.json` — v0.5 animation and stage expectations used by asset verification.
+Input becomes small JSON-serializable commands which `GameSimulation` applies using only supplied `dt` and an injectable RNG. The simulation owns a plain-data `GameState`, gameplay rules and timers, then exposes semantic events and copied serializable snapshots.
 
-No multiplayer, networking, backend, Telegram SDK, or Telegram integration is included.
+### Browser layer
 
-## Development
+- `src/game/Game.js` translates keyboard and pointer input into commands and orchestrates the frame loop.
+- Canvas drawing, HUD updates, images, procedural audio, rain, screen shake, and cosmetic particles remain presentation concerns.
+- `src/game/assets.js` is the logical asset manifest; `public/assets/` contains the image files.
 
-Install dependencies and start Vite's development server:
+### Simulation layer
+
+- `src/game/state/createGameState.js` creates canonical global, player, Stage 1, projectile, danger-zone, and Warden-X state using only primitives, arrays, and plain objects.
+- `src/game/simulation/commands.js` defines the serializable move, fire, dash, grenade, reload, pause, and restart command contract.
+- `src/game/simulation/GameSimulation.js` owns movement, collision, combat, AI, waves, stage progression, boss phases, gameplay timers, events, and snapshots without browser APIs or wall-clock access.
+- `src/game/simulation/rng.js` supplies the injectable random-number boundary, including a seeded generator for deterministic tests.
+
+There is **no multiplayer yet**, **no Telegram integration yet**, and **no backend yet**. This boundary exists so a later transport or authoritative server layer can reuse the same simulation contract; this change adds no networking.
+
+## Development and validation
 
 ```sh
 npm install
 npm run dev
-```
-
-Open the local URL printed by Vite. The source is now served as ES modules and is no longer intended to be opened by double-clicking a standalone HTML file.
-
-## Validation and production build
-
-```sh
 npm run check
+npm run test:simulation
 npm run build
+npm run verify:build
 npm run test:smoke
-npm run preview
 ```
 
-`npm run test:smoke` launches the production build in Chromium and verifies Stage 1 movement/fire plus the Warden-X transition and damage path.
-
-`npm run check` verifies the asset manifest against `public/assets/`. `npm run build` writes the production client to `dist/`, and `npm run preview` serves that build locally.
+The Node simulation suite requires no DOM, Canvas, or Playwright. The Chromium smoke test verifies browser boot, Stage 1 movement/fire, the Warden-X transition, and boss damage.
 
 ## Controls
 
@@ -48,10 +43,6 @@ npm run preview
 - **G:** grenade
 - **Touch controls:** movement, fire, dash, grenade, pause, and restart
 
-## Refactor scope
+## Scope and deployment
 
-There are no intentional changes to controls, balance, visuals, assets, enemy behavior, stage progression, or Warden-X phases in this PR. It establishes a maintainable build foundation before the planned GameState/simulation separation work.
-
-## Deployment
-
-The client currently has an explicit origin-root deployment contract (`base: '/'`): deploy the contents of `dist/` at the origin root so `/assets/...` URLs resolve correctly. Subpath deployment is not supported by this foundation PR.
+There are no intentional changes to controls, balance, assets, enemy behavior, stage progression, or Warden-X thresholds and patterns. No multiplayer, networking, backend, Telegram SDK, or Telegram integration is included. The production client retains its origin-root (`base: '/'`) deployment contract.
