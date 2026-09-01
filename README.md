@@ -32,8 +32,11 @@ Open the local URL printed by Vite. The source is now served as ES modules and i
 ```sh
 npm run check
 npm run build
+npm run test:smoke
 npm run preview
 ```
+
+`npm run test:smoke` launches the production build in Chromium and verifies Stage 1 movement/fire plus the Warden-X transition and damage path.
 
 `npm run check` verifies the asset manifest against `public/assets/`. `npm run build` writes the production client to `dist/`, and `npm run preview` serves that build locally.
 
@@ -48,3 +51,7 @@ npm run preview
 ## Refactor scope
 
 There are no intentional changes to controls, balance, visuals, assets, enemy behavior, stage progression, or Warden-X phases in this PR. It establishes a maintainable build foundation before the planned GameState/simulation separation work.
+
+## Deployment
+
+The client currently has an explicit origin-root deployment contract (`base: '/'`): deploy the contents of `dist/` at the origin root so `/assets/...` URLs resolve correctly. Subpath deployment is not supported by this foundation PR.
