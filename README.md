@@ -18,6 +18,8 @@ GameSimulation
 
 `LocalGameSession` is the current offline, single-player implementation. It queues commands, advances the simulation with browser frame `dt`, and returns copied JSON-serializable snapshots and semantic events. Its in-memory `LoopbackTransport` exchanges versioned protocol messages with a `LocalSimulationHost`, demonstrating the transport boundary without adding a network or changing gameplay timing.
 
+The protocol's `FRAME` message and its `dt` are local simulation-host controls only: browser frame time drives the offline game. They are not an authoritative multiplayer wire contract. A future authoritative server must own its clock and must never trust client-provided `dt`.
+
 ### Browser layer
 
 - `src/game/Game.js` translates keyboard and pointer input into commands and orchestrates the frame loop.

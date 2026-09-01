@@ -5,7 +5,7 @@ import { CommandType, fireCommand, moveCommand } from '../src/game/simulation/co
 import { createSeededRng } from '../src/game/simulation/rng.js';
 import { SessionStatus } from '../src/game/session/GameSession.js';
 import { LocalGameSession } from '../src/game/session/LocalGameSession.js';
-import { createCommandMessage, createFrameMessage, PROTOCOL_VERSION } from '../src/game/session/protocol.js';
+import { createCommandMessage, createFrameMessage, PROTOCOL_VERSION, validateSessionResponses } from '../src/game/session/protocol.js';
 
 const create = (seed = 7) => new LocalGameSession({ rng: createSeededRng(seed) });
 const advance = (session, seconds) => { for (let elapsed = 0; elapsed < seconds; elapsed += .02) session.update(.02); };
@@ -38,6 +38,13 @@ test('snapshots are copies and cannot mutate canonical state', () => {
   assert.equal(session.getSnapshot().player.hp, 100);
 });
 
+test('session implementation internals are not publicly reachable', () => {
+  const session = create();
+  for (const property of ['transport', 'snapshot', 'commands', 'events', 'status', 'host', 'simulation']) {
+    assert.equal(property in session, false, `${property} must remain private`);
+  }
+});
+
 test('commands, protocol messages, snapshots, and events are JSON serializable', () => {
   const session = create(), command = fireCommand(true);
   assert.doesNotThrow(() => JSON.stringify(command));
@@ -52,6 +59,13 @@ test('commands, protocol messages, snapshots, and events are JSON serializable',
 test('session rejects values that cannot cross a JSON transport', () => {
   const session = create();
   assert.throws(() => session.submit({ type: CommandType.MOVE, callback() {} }), /JSON values/);
+});
+
+test('response validation rejects wrong versions and unsupported types', () => {
+  assert.throws(() => validateSessionResponses([{ version: 2, type: 'snapshot', snapshot: {} }]), /protocol version/);
+  assert.throws(() => validateSessionResponses([{ version: PROTOCOL_VERSION, type: 'mystery' }]), /response type/);
+  assert.throws(() => validateSessionResponses({}), /must be an array/);
+  assert.throws(() => validateSessionResponses([null]), /Malformed/);
 });
 
 test('deterministic RNG remains repeatable through local sessions', () => {

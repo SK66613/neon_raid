@@ -10,6 +10,8 @@ export const SessionResponseType = Object.freeze({
   EVENTS: 'events',
 });
 
+const supportedResponseTypes = new Set(Object.values(SessionResponseType));
+
 const assertSerializable = value => {
   if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
     throw new TypeError('Session payload must contain JSON values only');
@@ -41,6 +43,9 @@ export const createFrameMessage = (dt, commands) => cloneSerializable({
   commands,
 });
 
+// FRAME is local host control: browser dt drives offline simulation only.
+// A future authoritative host owns its clock and must never trust client dt.
+
 export const createSnapshotMessage = snapshot => cloneSerializable({
   version: PROTOCOL_VERSION,
   type: SessionResponseType.SNAPSHOT,
@@ -52,3 +57,13 @@ export const createEventsMessage = events => cloneSerializable({
   type: SessionResponseType.EVENTS,
   events,
 });
+
+export const validateSessionResponses = responses => {
+  if (!Array.isArray(responses)) throw new TypeError('Session responses must be an array');
+  for (const response of responses) {
+    if (!response || typeof response !== 'object' || Array.isArray(response)) throw new TypeError('Malformed session response');
+    if (response.version !== PROTOCOL_VERSION) throw new Error(`Unsupported response protocol version: ${response.version}`);
+    if (!supportedResponseTypes.has(response.type)) throw new Error(`Unsupported session response type: ${response.type}`);
+  }
+  return responses;
+};

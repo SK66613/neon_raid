@@ -8,27 +8,29 @@ const DebugMessageType = Object.freeze({
 });
 
 export class LocalSimulationHost {
+  #simulation;
+
   constructor(options) {
-    this.simulation = new GameSimulation(options);
+    this.#simulation = new GameSimulation(options);
   }
 
   receive(message) {
     if (message.type === SessionMessageType.FRAME) {
-      this.simulation.step(message.dt, message.commands);
+      this.#simulation.step(message.dt, message.commands);
     } else if (message.type === DebugMessageType.SKIP_TO_BOSS) {
-      this.simulation.skipToBoss();
+      this.#simulation.skipToBoss();
     } else if (message.type === DebugMessageType.COMPLETE_STAGE_ONE) {
-      this.simulation.completeStageOne();
+      this.#simulation.completeStageOne();
     } else if (message.type === DebugMessageType.DAMAGE_BOSS) {
-      this.simulation.damageBoss(message.amount);
+      this.#simulation.damageBoss(message.amount);
     } else {
       throw new Error(`Unsupported local message: ${message.type}`);
     }
-    return [createSnapshotMessage(this.simulation.getSnapshot()), createEventsMessage(this.simulation.drainEvents())];
+    return [createSnapshotMessage(this.#simulation.getSnapshot()), createEventsMessage(this.#simulation.drainEvents())];
   }
 
   initialSnapshot() {
-    return createSnapshotMessage(this.simulation.getSnapshot());
+    return createSnapshotMessage(this.#simulation.getSnapshot());
   }
 }
 
