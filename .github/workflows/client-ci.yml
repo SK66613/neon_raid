@@ -26,9 +26,16 @@ jobs:
           node --check src/main.js
           node --check src/game/Game.js
           node --check src/game/assets.js
+          node --check src/game/state/createGameState.js
+          node --check src/game/simulation/commands.js
+          node --check src/game/simulation/rng.js
+          node --check src/game/simulation/GameSimulation.js
+          node --check tests/simulation.test.js
           node --check scripts/verify-assets.mjs
           node --check scripts/verify-build.mjs
           node --check tests/smoke.spec.js
+      - name: Test deterministic simulation
+        run: npm run test:simulation
       - name: Build client
         run: npm run build
       - name: Validate production output
