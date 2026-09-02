@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'; import test from 'node:test'; import { RaidRoom } from '../server/RaidRoom.js';
-class Socket { constructor(){this.messages=[];this.attachment=null;this.closed=false;} send(v){this.messages.push(JSON.parse(v));} serializeAttachment(v){this.attachment=structuredClone(v);} deserializeAttachment(){return structuredClone(this.attachment);} close(){this.closed=true;} }
+class Socket { constructor(){this.messages=[];this.attachment=null;this.closed=false;this.readyState=1;this.closeArgs=[];this.throwOnSend=false;} send(v){if(this.throwOnSend)throw new Error('broken send');this.messages.push(JSON.parse(v));} serializeAttachment(v){this.attachment=structuredClone(v);} deserializeAttachment(){return structuredClone(this.attachment);} close(code,reason){this.closed=true;this.readyState=3;this.closeArgs.push([code,reason]);} }
 class Context { constructor(){this.sockets=[];} acceptWebSocket(s){this.sockets.push(s);} getWebSockets(){return [...this.sockets];} remove(s){this.sockets=this.sockets.filter(x=>x!==s);} }
 class FakeResponse { constructor(body,init={}){this.body=body;this.status=init.status??200;this.webSocket=init.webSocket;} static json(v,init){return new FakeResponse(JSON.stringify(v),init);} async json(){return JSON.parse(this.body);} }
 class Scheduler { constructor(){this.callbacks=new Map();this.next=1;this.clears=0;} setInterval(fn,ms){assert.equal(ms,1000/30);const id=this.next++;this.callbacks.set(id,fn);return id;} clearInterval(id){this.clears++;this.callbacks.delete(id);} tick(){for(const fn of [...this.callbacks.values()])fn();} }
@@ -21,8 +21,26 @@ test('RaidRoom runs match lifecycle, strict matched sequencing, and fresh replac
  room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:4,command:{type:'dash'}})); assert.equal(last(one,'error').code,'stale-sequence');
  for(const extra of [{slot:2},{dt:.1}]) room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:5,command:{type:'dash'},...extra})); assert.equal(last(one,'error').code,'invalid-message');
  scheduler.tick(); assert.equal(frames(one).at(-1).snapshot.players[0].moveX,1); assert.equal(frames(two).at(-1).snapshot.players[1].moveX,-1); assert.equal(frames(one).at(-1).snapshot.boss.hp,frames(two).at(-1).snapshot.boss.hp);
- ctx.remove(two); room.webSocketClose(two); assert.equal(scheduler.callbacks.size,0); assert.equal(one.closed,false); assert.equal(last(one,'match-aborted').reason,'player-left'); assert.equal(one.attachment.matchState,'waiting');
+ const departingAbortCount=two.messages.filter(m=>m.type==='match-aborted').length; room.webSocketClose(two,1000,'client left',true); assert.deepEqual(two.closeArgs.at(-1),[1000,'client left']); assert.equal(two.messages.filter(m=>m.type==='match-aborted').length,departingAbortCount); assert.equal(scheduler.callbacks.size,0); assert.equal(one.closed,false); assert.equal(last(one,'match-aborted').reason,'player-left'); assert.equal(one.attachment.matchState,'waiting');
+ ctx.remove(two);
  await room.fetch(req); const replacement=pairs[2].server; assert.equal(one.attachment.matchId,'match-2'); assert.equal(replacement.attachment.matchId,'match-2'); assert.notEqual(one.attachment.matchId,'match-1');
  room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:5,command:{type:'dash'}})); assert.equal(last(one,'error').code,'stale-match'); assert.equal(one.attachment.lastInputSeq,4);
  room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-2',seq:5,command:{type:'dash'}})); assert.equal(last(one,'input-ack').matchId,'match-2'); room.abortMatch('server-error'); assert.equal(scheduler.callbacks.size,0);
+});
+
+test('broadcast skips CLOSING sockets and abort cleanup survives a throwing send', async t=>{
+ const oldR=globalThis.Response,oldW=globalThis.WebSocketPair,pairs=[]; globalThis.Response=FakeResponse; globalThis.WebSocketPair=class{constructor(){this.client=new Socket();this.server=new Socket();pairs.push(this);}};
+ t.after(()=>{globalThis.Response=oldR;if(oldW===undefined)delete globalThis.WebSocketPair;else globalThis.WebSocketPair=oldW;});
+ const ctx=new Context(),scheduler=new Scheduler(),room=new RaidRoom(ctx,{scheduler,createMatchId:()=> 'failure-match'}),req=new Request('https://x/ws?roomId=room',{headers:{Upgrade:'websocket'}});
+ await room.fetch(req);await room.fetch(req);const survivor=pairs[0].server,departing=pairs[1].server;
+ departing.readyState=2;const count=departing.messages.length;scheduler.tick();assert.equal(departing.messages.length,count);assert.equal(frames(survivor).at(-1).tick,1);
+ survivor.throwOnSend=true;room.webSocketClose(departing,1001,'away',true);
+ assert.equal(scheduler.callbacks.size,0);assert.equal(room.host,null);assert.equal(survivor.attachment.matchState,'waiting');
+});
+
+test('webSocketError closes and excludes the failed socket while the survivor waits',async t=>{
+ const oldR=globalThis.Response,oldW=globalThis.WebSocketPair,pairs=[];globalThis.Response=FakeResponse;globalThis.WebSocketPair=class{constructor(){this.client=new Socket();this.server=new Socket();pairs.push(this);}};
+ t.after(()=>{globalThis.Response=oldR;if(oldW===undefined)delete globalThis.WebSocketPair;else globalThis.WebSocketPair=oldW;});
+ const ctx=new Context(),scheduler=new Scheduler(),room=new RaidRoom(ctx,{scheduler,createMatchId:()=> 'error-match'}),req=new Request('https://x/ws?roomId=room',{headers:{Upgrade:'websocket'}});await room.fetch(req);await room.fetch(req);const survivor=pairs[0].server,failed=pairs[1].server,failedCount=failed.messages.length;
+ room.webSocketError(failed);assert.deepEqual(failed.closeArgs.at(-1),[1011,'WebSocket error']);assert.equal(failed.messages.length,failedCount);assert.equal(last(survivor,'match-aborted').reason,'player-left');assert.equal(survivor.attachment.matchState,'waiting');assert.equal(scheduler.callbacks.size,0);
 });

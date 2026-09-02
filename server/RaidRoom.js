@@ -9,6 +9,7 @@ import {
 
 const json = message => JSON.stringify(message);
 const seedFrom = value => { let seed = 2166136261; for (const char of value) seed = Math.imul(seed ^ char.charCodeAt(0), 16777619); return seed >>> 0; };
+const isOpenSocket = socket => socket?.readyState === (globalThis.WebSocket?.OPEN ?? 1);
 
 export class RaidRoom {
   constructor(ctx, options = {}) {
@@ -87,28 +88,38 @@ export class RaidRoom {
     socket.send(json(createInputAckMessage(message.matchId, message.seq)));
   }
 
-  webSocketClose(socket) { this.handleDeparture(socket); }
+  webSocketClose(socket, code, reason, wasClean) {
+    try { socket.close(code, reason); } catch {}
+    this.handleDeparture(socket);
+  }
   webSocketError(socket) { try { socket.close(1011, 'WebSocket error'); } catch {} this.handleDeparture(socket); }
   handleDeparture(socket) {
     const attachment = socket.deserializeAttachment();
-    if (attachment?.matchState === 'active') this.abortMatch('player-left');
-    else if (attachment?.matchState === 'complete') { this.stopTimer(); this.host = null; this.markWaiting(); }
+    if (attachment?.matchState === 'active') this.abortMatch('player-left', socket);
+    else if (attachment?.matchState === 'complete') { this.stopTimer(); this.host = null; this.markWaiting(socket); }
     this.broadcastRoster(socket);
   }
-  abortMatch(reason) {
+  abortMatch(reason, excludedSocket = null) {
     const matchId = this.host?.getMatchId() ?? this.ctx.getWebSockets().map(s => s.deserializeAttachment()?.matchId).find(Boolean);
     this.stopTimer(); this.host = null;
-    if (matchId) this.broadcast(createMatchAbortedMessage(matchId, reason));
-    this.markWaiting();
+    this.markWaiting(excludedSocket);
+    if (matchId) this.broadcast(createMatchAbortedMessage(matchId, reason), excludedSocket);
   }
-  markWaiting() { for (const socket of this.ctx.getWebSockets()) this.updateAttachment(socket, { matchId: null, matchState: 'waiting' }); }
+  markWaiting(excludedSocket = null) { for (const socket of this.ctx.getWebSockets()) if (socket !== excludedSocket) this.updateAttachment(socket, { matchId: null, matchState: 'waiting' }); }
   stopTimer() { if (this.timer !== null) this.scheduler.clearInterval(this.timer); this.timer = null; }
   updateAttachment(socket, patch) { socket.serializeAttachment({ ...socket.deserializeAttachment(), ...patch }); }
   sendError(socket, code, message) { socket.send(json(createErrorMessage(code, message))); }
-  broadcast(message) { const encoded = json(message); for (const socket of this.ctx.getWebSockets()) socket.send(encoded); }
+  broadcast(message, excludedSocket = null) {
+    const encoded = json(message);
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket === excludedSocket || !isOpenSocket(socket)) continue;
+      try { socket.send(encoded); } catch {}
+    }
+  }
   broadcastRoster(excludedSocket = null) {
-    const sockets = this.ctx.getWebSockets().filter(socket => socket !== excludedSocket);
+    const sockets = this.ctx.getWebSockets().filter(socket => socket !== excludedSocket && isOpenSocket(socket));
     const coordinator = new RoomCoordinator(sockets.map(socket => socket.deserializeAttachment()).filter(Boolean));
-    const message = json(createRosterMessage(ROOM_CAPACITY, coordinator.roster())); for (const socket of sockets) socket.send(message);
+    const message = json(createRosterMessage(ROOM_CAPACITY, coordinator.roster()));
+    for (const socket of sockets) try { socket.send(message); } catch {}
   }
 }
