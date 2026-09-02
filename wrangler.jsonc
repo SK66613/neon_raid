@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "neon-raid-server",
+  "main": "server/worker.js",
+  "compatibility_date": "2025-08-26",
+  "durable_objects": {
+    "bindings": [
+      { "name": "RAID_ROOMS", "class_name": "RaidRoom" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RaidRoom"] }
+  ]
+}
