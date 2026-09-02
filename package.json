@@ -13,6 +13,7 @@
     "test:simulation": "node --test tests/simulation.test.js",
     "test:session": "node --test tests/session.test.js",
     "test:room": "node --test tests/room.test.js tests/multiplayer-protocol.test.js tests/worker.test.js tests/raid-room.test.js",
+    "test:multiplayer-simulation": "node --test tests/multiplayer-simulation.test.js",
     "dev:server": "npx --yes wrangler@4.33.1 dev",
     "build:server": "npx --yes wrangler@4.33.1 deploy --dry-run --outdir dist-worker"
   },

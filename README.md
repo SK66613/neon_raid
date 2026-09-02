@@ -9,18 +9,23 @@ Input becomes small JSON-serializable commands which cross an explicit session b
 ```text
 Browser
   ↓
-GameSession
-  ├─ LocalGameSession
-  │    ↓
-  │  GameSimulation
-  │
-  └─ future NetworkGameSession
-           ↓
-        WebSocket
-           ↓
-        Worker
-           ↓
-     RaidRoom Durable Object
+LocalGameSession
+  ↓
+single-player GameSimulation
+
+Future network path:
+
+NetworkGameSession
+  ↓
+WebSocket
+  ↓
+Worker
+  ↓
+RaidRoom Durable Object
+  ↓
+future authoritative tick host
+  ↓
+MultiplayerBossSimulation
 ```
 
 `LocalGameSession` is the current offline, single-player implementation. It queues commands, advances the simulation with browser frame `dt`, and returns copied JSON-serializable snapshots and semantic events. Its in-memory `LoopbackTransport` exchanges versioned protocol messages with a `LocalSimulationHost`, demonstrating the transport boundary without adding a network or changing gameplay timing.
@@ -48,7 +53,9 @@ The Cloudflare Worker exposes `POST /api/rooms` and `GET /api/rooms/:roomId/ws`.
 
 The multiplayer protocol is distinct from the local `FRAME` protocol. It accepts only `move`, `fire`, `dash`, and `grenade`; it never accepts browser `dt`, positions, HP, or damage results. The server will own gameplay time when authoritative simulation is introduced. Durable Object WebSocket attachments hold each connection's ID, slot, and last accepted sequence, allowing the room to rebuild its roster with `ctx.getWebSockets()` after hibernation without an always-awake timer.
 
-This change adds only the authoritative room/WebSocket foundation. There is **no client networking or `NetworkGameSession` yet**, **no two-player gameplay yet**, **no Telegram identity or authentication yet**, **no matchmaking yet**, and **no database**. Connection IDs are temporary anonymous identities; real Telegram authentication is explicitly deferred.
+The pure, authoritative `MultiplayerBossSimulation` now supplies a deterministic two-Raider Warden-X gameplay core. It owns a shared canonical boss and world, independent slot-ordered player resources and combat, stable monotonic entity IDs, copied JSON snapshots/events, and a server-supplied `step(dt)` boundary with a recommended fixed 30 Hz tick. Boss targeting uses deterministic round-robin selection over living Raiders in slot order.
+
+This core is **not wired into `RaidRoom` yet** and the client still does **not use WebSocket or a `NetworkGameSession`**. Multiplayer Stage 1, Telegram identity, and revive/reconnect gameplay are not implemented. The complete offline v0.5 single-player path remains unchanged.
 
 ## Development and validation
 
@@ -59,6 +66,7 @@ npm run check
 npm run test:simulation
 npm run test:session
 npm run test:room
+npm run test:multiplayer-simulation
 npm run build
 npm run verify:build
 npm run build:server
