@@ -1,6 +1,10 @@
 export const SessionStatus = Object.freeze({
   IDLE: 'idle',
+  CONNECTING: 'connecting',
+  WAITING: 'waiting',
   READY: 'ready',
+  COMPLETE: 'complete',
+  ERROR: 'error',
   CLOSED: 'closed',
 });
 

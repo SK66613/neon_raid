@@ -35,6 +35,8 @@ jobs:
           node --check src/game/session/LoopbackTransport.js
           node --check src/game/session/LocalSimulationHost.js
           node --check src/game/session/LocalGameSession.js
+          node --check src/game/session/NetworkGameSession.js
+          node --check src/game/presentation/networkView.js
           node --check src/game/network/protocol.js
           node --check src/game/multiplayer/config.js
           node --check src/game/multiplayer/createMultiplayerBossState.js
@@ -51,6 +53,8 @@ jobs:
           node --check tests/raid-room.test.js
           node --check tests/authoritative-match-host.test.js
           node --check tests/multiplayer-simulation.test.js
+          node --check tests/network-session.test.js
+          node --check tests/network-view.test.js
           node --check scripts/verify-assets.mjs
           node --check scripts/verify-build.mjs
           node --check tests/smoke.spec.js
@@ -64,6 +68,8 @@ jobs:
         run: npm run test:multiplayer-simulation
       - name: Test authoritative room host and integration
         run: npm run test:authoritative-room
+      - name: Test authoritative browser network session
+        run: npm run test:network-session
       - name: Build client
         run: npm run build
       - name: Validate production output

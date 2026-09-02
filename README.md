@@ -4,20 +4,20 @@ NEON RAID is a vanilla JavaScript and Canvas two-stage action prototype. This re
 
 ## Architecture
 
-Input becomes small JSON-serializable commands which cross an explicit session boundary. The local client remains the production path while the server-side boundary is now prepared for a future network session:
+Input becomes small JSON-serializable commands which cross an explicit session boundary. The default URL retains the complete offline path, while an explicit co-op URL selects the authoritative browser path:
 
 ```text
-Browser
+Game.js
   ↓
 LocalGameSession
   ↓
 single-player GameSimulation
 
-Server path (the browser client remains future work):
-
-Browser client (future NetworkGameSession)
+Game.js
   ↓
-WebSocket
+NetworkGameSession
+  ↓
+WebSocket protocol v2
   ↓
 Worker
   ↓
@@ -59,7 +59,23 @@ Attachments contain only `connectionId`, authoritative `slot`, `lastInputSeq`, `
 
 The pure, authoritative `MultiplayerBossSimulation` now supplies a deterministic two-Raider Warden-X gameplay core. It owns a shared canonical boss and world, independent slot-ordered player resources and combat, stable monotonic entity IDs, copied JSON snapshots/events, and a server-supplied `step(dt)` boundary with a recommended fixed 30 Hz tick. Boss targeting uses deterministic round-robin selection over living Raiders in slot order.
 
-The core is now wired into `RaidRoom`, but there is still **no browser WebSocket client or `NetworkGameSession`**. Multiplayer Stage 1, Telegram, reconnect/recovery, and active gameplay persistence are not implemented. The complete offline v0.5 single-player path remains unchanged.
+The browser `NetworkGameSession` creates or joins a room through the Worker, accepts its slot only from `welcome`, and renders the latest raw 30 Hz authoritative `state-frame`. Co-op is boss-only: the server owns all gameplay and the browser performs no multiplayer simulation. There is no prediction, interpolation, reconnect, Telegram, multiplayer Stage 1, or active-match persistence. The complete offline v0.5 single-player path remains the unchanged default at `/`.
+
+### Local two-tab co-op
+
+Start Wrangler and Vite separately:
+
+```sh
+# Terminal A
+npm run dev:server
+
+# Terminal B
+npm run dev
+```
+
+Open `http://localhost:5173/?coop=create`. Once the address changes to the shareable `?coop=join&room=<room-id>` URL, copy that URL into a second tab. The Vite development server proxies only `/api` (including WebSocket upgrades) to Wrangler at `127.0.0.1:8787`.
+
+Expected behavior: the tabs receive slots 1 and 2, begin at tick zero, render both Raiders and the same Warden-X, control only their server-assigned Raider, and share one boss HP value. Closing either tab aborts the match for the survivor; the survivor waits in the room, and a replacement tab starts a fresh match without resetting the surviving connection's input sequence.
 
 ## Development and validation
 
@@ -72,6 +88,7 @@ npm run test:session
 npm run test:room
 npm run test:multiplayer-simulation
 npm run test:authoritative-room
+npm run test:network-session
 npm run build
 npm run verify:build
 npm run build:server

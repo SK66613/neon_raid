@@ -10,7 +10,12 @@ import {
   createWelcomeMessage,
   validateCommand,
   validateInputMessage,
+  validateServerMessage,
 } from '../src/game/network/protocol.js';
+import { createMultiplayerBossState } from '../src/game/multiplayer/createMultiplayerBossState.js';
+
+const roomId = 'b'.repeat(64);
+const canonicalSnapshot = (tick = 0) => ({ ...createMultiplayerBossState(), tick });
 
 const input = (command, overrides = {}) => ({ version: 2, type: 'input', matchId: 'match', seq: 0, command, ...overrides });
 
@@ -72,4 +77,50 @@ test('state frames copy their JSON payloads and reject invalid data', () => {
   assert.throws(() => createStateFrameMessage('match', { tick: NaN }, []), TypeError);
   assert.throws(() => createStateFrameMessage('match', { tick: 0, bad: new Set() }, []), TypeError);
   assert.throws(() => createStateFrameMessage('match', { tick: 0 }, new Map()), TypeError);
+});
+
+test('client validates each exact server message envelope', () => {
+  const snapshot = canonicalSnapshot();
+  for (const message of [
+    createWelcomeMessage(roomId, 'connection', 1, 2), createRosterMessage(2, [{ connectionId: 'connection', slot: 1 }]),
+    createInputAckMessage('match', 0), createStateFrameMessage('match', snapshot, []),
+    createMatchAbortedMessage('match', 'player-left'), createErrorMessage('stale-match', 'Stale match.'),
+  ]) assert.equal(validateServerMessage(message).ok, true, message.type);
+});
+
+test('client rejects versions, unknown types, malformed frames, non-JSON and extra fields', () => {
+  const snapshot = canonicalSnapshot(2);
+  const valid = { version: 2, type: 'state-frame', matchId: 'match', tick: 2, snapshot, events: [] };
+  for (const message of [
+    { ...createWelcomeMessage(roomId, 'connection', 1, 2), version: 1 },
+    { version: 2, type: 'future' }, { ...valid, matchId: '' }, { ...valid, tick: Number.MAX_SAFE_INTEGER + 1 },
+    { ...valid, tick: 1 }, { ...valid, snapshot: { ...snapshot, players: [snapshot.players[0]] } },
+    { ...valid, snapshot: { ...snapshot, players: [snapshot.players[0], { ...snapshot.players[1], x: NaN }] } },
+    { ...valid, extra: true }, { ...createInputAckMessage('match', 1), extra: true },
+  ]) assert.equal(validateServerMessage(message).ok, false);
+});
+
+test('client rejects incomplete or invalid canonical snapshot state', () => {
+  const invalidSnapshots = [];
+  const without = key => { const value = canonicalSnapshot(); delete value[key]; return value; };
+  for (const key of ['status', 'boss', 'bullets', 'enemyBullets', 'dangerZones', 'medkits']) invalidSnapshots.push(without(key));
+  invalidSnapshots.push(
+    { ...canonicalSnapshot(), status: 'paused' },
+    { ...canonicalSnapshot(), boss: {} },
+    { ...canonicalSnapshot(), players: canonicalSnapshot().players.map(({ maxHp, ...player }) => player) },
+    { ...canonicalSnapshot(), players: canonicalSnapshot().players.map(({ maxArmor, ...player }) => player) },
+    { ...canonicalSnapshot(), players: canonicalSnapshot().players.map((player, index) => index ? player : { ...player, aimDirection: 'up' }) },
+    { ...canonicalSnapshot(), players: canonicalSnapshot().players.map(player => ({ ...player, slot: 1 })) },
+    { ...canonicalSnapshot(), boss: { ...canonicalSnapshot().boss, hp: Infinity } },
+    { ...canonicalSnapshot(), players: canonicalSnapshot().players.map((player, index) => index ? player : { ...player, speed: NaN }) },
+    { ...canonicalSnapshot(), bullets: [{ id: 'bullet-1', ownerSlot: 3, x: 1, y: 2, vx: 3, vy: 4, life: 1, damage: 10 }] },
+    { ...canonicalSnapshot(), enemyBullets: [{ id: 'enemy-1', x: 1, y: 2, vx: 3, vy: 4, life: 1, radius: 4, damage: 10, targetSlot: 3 }] },
+    { ...canonicalSnapshot(), enemyBullets: [{ id: 'enemy-1', x: Infinity, y: 2, vx: 3, vy: 4, life: 1, radius: 4, damage: 10 }] },
+    { ...canonicalSnapshot(), medkits: [{ id: '', x: 1, y: 2, alive: true }] },
+    { ...canonicalSnapshot(), dangerZones: [{ id: 'zone-1', x: 1, y: 2, radius: 20, delay: 1, life: 2, exploded: false, targetSlot: 7 }] },
+  );
+  for (const snapshot of invalidSnapshots) {
+    const frame = { version: 2, type: 'state-frame', matchId: 'match', tick: snapshot.tick, snapshot, events: [] };
+    assert.deepEqual(validateServerMessage(frame), { ok: false, code: 'invalid-message' });
+  }
 });
