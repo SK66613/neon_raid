@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createNetworkGameSession } from '../src/game/session/NetworkGameSession.js';
 import { SessionStatus } from '../src/game/session/GameSession.js';
 import { createMultiplayerBossState } from '../src/game/multiplayer/createMultiplayerBossState.js';
+import { PLAYER_CONFIG } from '../src/game/multiplayer/config.js';
 
 const roomId = 'a'.repeat(64);
 const snapshot = (tick, status = 'active') => ({ ...createMultiplayerBossState(), tick, status });
@@ -243,6 +244,19 @@ test('frame ACK boundary retains an unreflected dash and retires a reflected das
   socket.emit('message', message('input-ack', { matchId: 'm1', seq: 1 }));
   socket.emit('message', message('state-frame', { matchId: 'm1', tick: 2, snapshot: reflected, events: [] }));
   assert.equal(session.getRenderSnapshot().players[1].x, 277);
+});
+
+test('a reflected but rejected full-distance dash hard-snaps to server truth', async () => {
+  const { session, socket } = await setup(); const authoritative = snapshot(0);
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 0, snapshot: authoritative, events: [] }));
+  const startY = authoritative.players[1].y;
+  session.submit({ type: 'dash' }); session.update(0);
+  assert.equal(session.getRenderSnapshot().players[1].y, startY - PLAYER_CONFIG.dashDistance);
+
+  socket.emit('message', message('input-ack', { matchId: 'm1', seq: 0 }));
+  const rejected = snapshot(1); rejected.players[1].y = startY;
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 1, snapshot: rejected, events: [] }));
+  assert.equal(session.getRenderSnapshot().players[1].y, startY);
 });
 
 test('death, abort, and replacement match clear old presentation state', async () => {

@@ -7,6 +7,7 @@ const ROOM_ID = /^[0-9a-f]{64}$/;
 const copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const MAX_PRESENTATION_DT = 0.1;
 const HARD_SNAP_DISTANCE = 72;
+const REFLECTED_DASH_HARD_SNAP_DISTANCE = PLAYER_CONFIG.dashDistance * 0.75;
 const SOFT_CORRECTION_RATE = 14;
 const CORRECTION_EPSILON = 0.01;
 const lerp = (from, to, alpha) => from + (to - from) * alpha;
@@ -187,8 +188,10 @@ export class NetworkGameSession extends GameSession {
     this.#currentFrame = copy(message.snapshot); this.#interpolationElapsed = 0;
     this.#snapshot = copy(message.snapshot); this.#events.push(...copy(message.events));
     const frameAckSeq = this.#info.lastAckSeq;
+    const reflectedDash = frameAckSeq !== null && this.#sentMovement.some(input =>
+      input.seq <= frameAckSeq && input.command.type === 'dash');
     if (frameAckSeq !== null) this.#sentMovement = this.#sentMovement.filter(input => input.seq > frameAckSeq);
-    this.#reconcileLocalPlayer(oldVisible);
+    this.#reconcileLocalPlayer(oldVisible, reflectedDash);
     if (!this.#localPlayerAlive()) this.#outbound = [];
     this.#info.lastServerTick = message.tick;
     this.#status = message.snapshot.status === 'won' || message.snapshot.status === 'lost'
@@ -217,7 +220,7 @@ export class NetworkGameSession extends GameSession {
       y: this.#predictedPlayer.y + this.#correction.y } : null;
   }
 
-  #reconcileLocalPlayer(oldVisible) {
+  #reconcileLocalPlayer(oldVisible, reflectedDash = false) {
     const authoritative = this.#snapshot.players.find(player => player.slot === this.#info.slot);
     if (!authoritative?.alive) { this.#predictedPlayer = null; this.#correction = { x: 0, y: 0 }; return; }
     this.#predictedPlayer = copy(authoritative);
@@ -225,7 +228,10 @@ export class NetworkGameSession extends GameSession {
     for (const input of this.#sentMovement) if (input.command.type === 'dash') this.#applyPredictedDash();
     if (!oldVisible) { this.#correction = { x: 0, y: 0 }; return; }
     const dx = oldVisible.x - this.#predictedPlayer.x, dy = oldVisible.y - this.#predictedPlayer.y;
-    this.#correction = Math.hypot(dx, dy) >= HARD_SNAP_DISTANCE ? { x: 0, y: 0 } : { x: dx, y: dy };
+    const distance = Math.hypot(dx, dy);
+    const hardSnap = distance >= HARD_SNAP_DISTANCE
+      || (reflectedDash && distance >= REFLECTED_DASH_HARD_SNAP_DISTANCE);
+    this.#correction = hardSnap ? { x: 0, y: 0 } : { x: dx, y: dy };
   }
 
   #applyPredictedDash() {
