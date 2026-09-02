@@ -9,6 +9,7 @@ import {
 } from '../src/game/network/protocol.js';
 
 export const RECONNECT_GRACE_MS = 8000;
+export const PENDING_RESUME_AUTH_MS = 2000;
 
 const json = message => JSON.stringify(message);
 const seedFrom = value => { let seed = 2166136261; for (const char of value) seed = Math.imul(seed ^ char.charCodeAt(0), 16777619); return seed >>> 0; };
@@ -25,6 +26,7 @@ export class RaidRoom {
     this.host = null;
     this.timer = null;
     this.reservations = new Map();
+    this.pendingResumeAuth = new Map();
     this.failClosedStaleAttachments();
   }
 
@@ -56,10 +58,14 @@ export class RaidRoom {
     const url = new URL(request.url); const pendingResume = url.searchParams.get('resume') === '1';
     this.roomId = url.searchParams.get('roomId');
     if (pendingResume) {
-      const pendingCount = this.openSockets().filter(socket => socket.deserializeAttachment()?.socketType === 'pending-resume').length;
-      if (pendingCount >= ROOM_CAPACITY) return Response.json({ error: 'too-many-resume-attempts' }, { status: 429 });
+      const matchId = this.host?.getMatchId();
+      const resumable = matchId && [...this.reservations.values()].some(reservation => reservation.matchId === matchId);
+      if (!resumable) return Response.json({ error: 'resume-unavailable' }, { status: 409 });
+      if (this.pendingResumeAuth.size >= ROOM_CAPACITY) return Response.json({ error: 'too-many-resume-attempts' }, { status: 429 });
       const pair = new WebSocketPair(); const [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server); server.serializeAttachment({ socketType: 'pending-resume' });
+      const timeout = this.scheduler.setTimeout(() => this.retirePendingResume(server, 1008, 'Resume authentication timed out'), PENDING_RESUME_AUTH_MS);
+      this.pendingResumeAuth.set(server, { matchId, timeout });
       return new Response(null, { status: 101, webSocket: client });
     }
     const occupied = [...this.memberSockets().map(socket => socket.deserializeAttachment()), ...this.reservations.values()];
@@ -97,6 +103,7 @@ export class RaidRoom {
         this.stopTimer();
         const matchId = this.host.getMatchId(), hadVacancy = [...this.reservations.values()].some(item => item.matchId === matchId);
         this.clearReservations(matchId);
+        this.clearPendingResumes(matchId);
         for (const socket of this.memberSockets()) this.updateAttachment(socket, hadVacancy ? { matchId: null, matchState: 'waiting', resumeToken: null } : { matchState: 'complete', resumeToken: null });
         if (hadVacancy) this.host = null;
         this.broadcastRoster();
@@ -132,7 +139,7 @@ export class RaidRoom {
   webSocketError(socket) { try { socket.close(1011, 'WebSocket error'); } catch {} this.handleDeparture(socket); }
   handleDeparture(socket, intentional = false) {
     const attachment = socket.deserializeAttachment();
-    if (attachment?.socketType === 'pending-resume') return;
+    if (attachment?.socketType === 'pending-resume') { this.retirePendingResume(socket); return; }
     if (attachment?.matchState === 'active' && attachment.reconnectCapable && attachment.resumeToken && !intentional) this.reserveDeparture(attachment);
     else if (attachment?.matchState === 'active') this.abortMatch('player-left', socket);
     else if (attachment?.matchState === 'complete') { this.stopTimer(); this.host = null; this.markWaiting(socket); }
@@ -149,11 +156,14 @@ export class RaidRoom {
   handleResume(socket, message) {
     const validation = validateResumeMessage(message);
     const reservation = validation.ok ? this.reservations.get(message.connectionId) : null;
-    if (reservation && reservation.deadline <= this.now()) this.expireReservation(reservation.connectionId, reservation.matchId);
     const valid = reservation && reservation.matchId === message.matchId && reservation.resumeToken === message.resumeToken
       && this.reservations.get(reservation.connectionId) === reservation
       && reservation.deadline > this.now() && this.host?.getMatchId() === reservation.matchId;
-    if (!valid) return this.sendError(socket, 'resume-rejected', 'Resume was rejected.');
+    if (!valid) {
+      this.safeSend(socket, createErrorMessage('resume-rejected', 'Resume was rejected.'));
+      return this.retirePendingResume(socket, 1008, 'Resume rejected');
+    }
+    this.clearPendingResumeTracking(socket);
     this.scheduler.clearTimeout(reservation.timeout); this.reservations.delete(reservation.connectionId);
     const resumeToken = this.createResumeToken();
     socket.serializeAttachment({ socketType: 'member', connectionId: reservation.connectionId, slot: reservation.slot, lastInputSeq: -1, matchId: reservation.matchId, matchState: 'active', reconnectCapable: true, resumeToken });
@@ -168,9 +178,23 @@ export class RaidRoom {
     this.abortMatch('player-left');
   }
   clearReservations(matchId = null) { for (const [id, reservation] of this.reservations) if (!matchId || reservation.matchId === matchId) { this.scheduler.clearTimeout(reservation.timeout); this.reservations.delete(id); } }
+  clearPendingResumeTracking(socket) {
+    const pending = this.pendingResumeAuth.get(socket);
+    if (!pending) return false;
+    this.scheduler.clearTimeout(pending.timeout); this.pendingResumeAuth.delete(socket); return true;
+  }
+  retirePendingResume(socket, code = null, reason = null) {
+    if (!this.clearPendingResumeTracking(socket)) return;
+    if (code !== null) try { socket.close(code, reason); } catch {}
+  }
+  clearPendingResumes(matchId = null) {
+    for (const [socket, pending] of this.pendingResumeAuth) {
+      if (!matchId || pending.matchId === matchId) this.retirePendingResume(socket, 1008, 'Resume unavailable');
+    }
+  }
   abortMatch(reason, excludedSocket = null) {
     const matchId = this.host?.getMatchId() ?? this.ctx.getWebSockets().map(s => s.deserializeAttachment()?.matchId).find(Boolean);
-    this.stopTimer(); this.host = null; this.clearReservations(matchId);
+    this.stopTimer(); this.host = null; this.clearReservations(matchId); this.clearPendingResumes(matchId);
     this.markWaiting(excludedSocket);
     if (matchId) this.broadcast(createMatchAbortedMessage(matchId, reason), excludedSocket);
   }
