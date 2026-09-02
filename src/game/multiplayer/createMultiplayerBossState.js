@@ -8,8 +8,7 @@ const createPlayer = (slot, x) => ({
   maxArmor: PLAYER_CONFIG.armor, ammo: PLAYER_CONFIG.magazine,
   reserveAmmo: PLAYER_CONFIG.reserveAmmo, grenades: PLAYER_CONFIG.grenades,
   fireCooldown: 0, reloadTimer: 0, dashTimer: 0, dashCooldown: 0,
-  hitTimer: 0, firing: false, alive: true, pendingDash: false,
-  pendingGrenade: false,
+  hitTimer: 0, firing: false, alive: true, pendingActions: [],
 });
 
 export function createMultiplayerBossState() {

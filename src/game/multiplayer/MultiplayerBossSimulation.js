@@ -1,6 +1,6 @@
 import { validateCommand } from '../network/protocol.js';
 import { createMathRandomRng } from '../simulation/rng.js';
-import { ARENA, DANGER_CONFIG, PLAYER_CONFIG } from './config.js';
+import { ARENA, DANGER_CONFIG, MULTIPLAYER_TICK_DT, PLAYER_CONFIG } from './config.js';
 import { createMultiplayerBossState } from './createMultiplayerBossState.js';
 
 const W = 360, H = 540;
@@ -23,20 +23,25 @@ export class MultiplayerBossSimulation {
     if (!player.alive || this.state.status !== 'active') return false;
     if (command.type === 'move') { player.moveX = command.x; player.moveY = command.y; }
     else if (command.type === 'fire') player.firing = command.active;
-    else if (command.type === 'dash') player.pendingDash = true;
-    else if (command.type === 'grenade') player.pendingGrenade = true;
+    else player.pendingActions.push(command.type);
     return true;
   }
 
   step(dt) {
     if (!Number.isFinite(dt) || dt < 0) throw new TypeError('dt must be a finite non-negative number');
     if (this.state.status !== 'active') return;
-    dt = Math.min(dt, 0.033);
+    dt = Math.min(dt, MULTIPLAYER_TICK_DT);
     this.state.tick++;
-    for (const player of this.state.players) this.#playerStep(player, dt);
+    for (const player of this.state.players) {
+      this.#playerStep(player, dt);
+      if (this.state.status !== 'active') return;
+    }
     this.#bossStep(dt);
+    if (this.state.status !== 'active') return;
     this.#projectiles(dt);
+    if (this.state.status !== 'active') return;
     this.#dangerZones(dt);
+    if (this.state.status !== 'active') return;
     this.#medkits();
   }
 
@@ -54,10 +59,10 @@ export class MultiplayerBossSimulation {
     if (player.hp <= 0) {
       player.hp = 0; player.alive = false; player.firing = false;
       player.moveX = 0; player.moveY = 0; player.vx = 0; player.vy = 0;
-      player.pendingDash = false; player.pendingGrenade = false;
+      player.pendingActions = [];
       this.#emit('player-died', { slot });
       if (this.state.players.every(item => !item.alive)) {
-        this.state.status = 'lost'; this.#emit('match-lost');
+        this.state.status = 'lost'; this.#clearInputs(); this.#emit('match-lost');
       }
     }
     return true;
@@ -70,7 +75,7 @@ export class MultiplayerBossSimulation {
     boss.hp = Math.max(0, boss.hp - amount); boss.flashTimer = flashDuration;
     this.#emit('boss-hit', { ...(ownerSlot ? { slot: ownerSlot } : {}), damage: amount, hp: boss.hp });
     if (boss.hp === 0) {
-      this.state.status = 'won'; this.#emit('boss-defeated'); this.#emit('match-won');
+      this.state.status = 'won'; this.#clearInputs(); this.#emit('boss-defeated'); this.#emit('match-won');
     }
     return true;
   }
@@ -81,6 +86,22 @@ export class MultiplayerBossSimulation {
   }
   #id(kind) { return `${kind}-${this.state.nextEntityId++}`; }
   #emit(type, detail = {}) { this.events.push({ type, ...detail }); }
+  #clearInputs() {
+    for (const player of this.state.players) {
+      player.firing = false; player.moveX = 0; player.moveY = 0; player.pendingActions = [];
+    }
+  }
+  #blocked(player, x, y) {
+    return x - player.radius < ARENA.minX || x + player.radius > ARENA.maxX
+      || y - player.radius < ARENA.minY || y + player.radius > ARENA.maxY;
+  }
+  #move(player, dx, dy) {
+    const oldX = player.x, oldY = player.y;
+    player.x += dx;
+    if (this.#blocked(player, player.x, player.y)) player.x = oldX;
+    player.y += dy;
+    if (this.#blocked(player, player.x, player.y)) player.y = oldY;
+  }
   #direction(player, dx, dy) {
     if (Math.hypot(dx, dy) < 0.001) return player.lastDirection;
     const index = Math.round((Math.atan2(dy, dx) + Math.PI / 2) / (Math.PI / 4));
@@ -94,9 +115,12 @@ export class MultiplayerBossSimulation {
     player.dashCooldown = Math.max(0, player.dashCooldown - dt);
     player.fireCooldown = Math.max(0, player.fireCooldown - dt);
     this.#reload(player, dt);
-    if (player.pendingDash) this.#dash(player);
-    if (player.pendingGrenade) this.#grenade(player);
-    player.pendingDash = false; player.pendingGrenade = false;
+    const actions = player.pendingActions;
+    player.pendingActions = [];
+    for (const action of actions) {
+      if (action === 'dash') this.#dash(player); else this.#grenade(player);
+      if (this.state.status !== 'active') return;
+    }
     if (player.firing) this.#fire(player);
     let dx = player.moveX, dy = player.moveY;
     if (dx || dy) {
@@ -110,8 +134,7 @@ export class MultiplayerBossSimulation {
     const speed = Math.hypot(player.vx, player.vy);
     const maximum = player.speed * (player.dashTimer > 0 ? 1.6 : 1);
     if (speed > maximum) { player.vx = player.vx / speed * maximum; player.vy = player.vy / speed * maximum; }
-    player.x = clamp(player.x + player.vx * dt, ARENA.minX + player.radius, ARENA.maxX - player.radius);
-    player.y = clamp(player.y + player.vy * dt, ARENA.minY + player.radius, ARENA.maxY - player.radius);
+    this.#move(player, player.vx * dt, player.vy * dt);
   }
 
   #fire(player) {
@@ -144,8 +167,9 @@ export class MultiplayerBossSimulation {
     let dx = player.moveX, dy = player.moveY;
     if (!dx && !dy) { const angle = -Math.PI / 2 + DIRECTIONS.indexOf(player.lastDirection) * Math.PI / 4; dx = Math.cos(angle); dy = Math.sin(angle); }
     const length = Math.hypot(dx, dy) || 1;
-    player.x = clamp(player.x + dx / length * PLAYER_CONFIG.dashDistance, ARENA.minX + player.radius, ARENA.maxX - player.radius);
-    player.y = clamp(player.y + dy / length * PLAYER_CONFIG.dashDistance, ARENA.minY + player.radius, ARENA.maxY - player.radius);
+    const nextX = clamp(player.x + dx / length * PLAYER_CONFIG.dashDistance, 18, 342);
+    const nextY = clamp(player.y + dy / length * PLAYER_CONFIG.dashDistance, 70, 508);
+    if (!this.#blocked(player, nextX, nextY)) { player.x = nextX; player.y = nextY; }
     player.dashTimer = PLAYER_CONFIG.dashDuration; player.dashCooldown = PLAYER_CONFIG.dashCooldown;
     this.#emit('dash', { slot: player.slot, x: player.x, y: player.y });
   }
@@ -231,13 +255,17 @@ export class MultiplayerBossSimulation {
           bullet.life = 0; this.damagePlayer(player.slot, bullet.damage); break;
         }
       }
+      if (this.state.status !== 'active') return;
     }
     this.state.enemyBullets = this.state.enemyBullets.filter(b => b.life > 0 && b.x > -25 && b.x < W + 25 && b.y > -25 && b.y < H + 25);
   }
   #dangerZones(dt) {
     for (const zone of this.state.dangerZones) {
       zone.delay -= dt; zone.life -= dt;
-      if (zone.delay <= 0 && !zone.exploded) { zone.exploded = true; this.#explode(zone.x, zone.y, zone.radius + 20, 0); }
+      if (zone.delay <= 0 && !zone.exploded) {
+        zone.exploded = true; this.#explode(zone.x, zone.y, zone.radius + 20, 0);
+        if (this.state.status !== 'active') return;
+      }
     }
     this.state.dangerZones = this.state.dangerZones.filter(zone => zone.life > 0);
   }
