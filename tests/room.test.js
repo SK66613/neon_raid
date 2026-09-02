@@ -59,6 +59,6 @@ test('wire commands cannot inject authoritative state or global controls', () =>
     { type: 'restart' },
     { type: 'unknown' },
   ]) {
-    assert.equal(validateInputMessage({ version: 1, type: 'input', seq: 0, command }).ok, false);
+    assert.equal(validateInputMessage({ version: 2, type: 'input', matchId: 'match', seq: 0, command }).ok, false);
   }
 });

@@ -40,6 +40,7 @@ jobs:
           node --check src/game/multiplayer/createMultiplayerBossState.js
           node --check src/game/multiplayer/MultiplayerBossSimulation.js
           node --check server/room/RoomCoordinator.js
+          node --check server/room/AuthoritativeMatchHost.js
           node --check server/RaidRoom.js
           node --check server/worker.js
           node --check tests/simulation.test.js
@@ -48,6 +49,7 @@ jobs:
           node --check tests/multiplayer-protocol.test.js
           node --check tests/worker.test.js
           node --check tests/raid-room.test.js
+          node --check tests/authoritative-match-host.test.js
           node --check tests/multiplayer-simulation.test.js
           node --check scripts/verify-assets.mjs
           node --check scripts/verify-build.mjs
@@ -60,6 +62,8 @@ jobs:
         run: npm run test:room
       - name: Test authoritative multiplayer boss simulation
         run: npm run test:multiplayer-simulation
+      - name: Test authoritative room host and integration
+        run: npm run test:authoritative-room
       - name: Build client
         run: npm run build
       - name: Validate production output
