@@ -59,6 +59,7 @@ jobs:
           node --check tests/network-view.test.js
           node --check scripts/verify-assets.mjs
           node --check scripts/verify-build.mjs
+          node --check scripts/verify-deployment-config.mjs
           node --check tests/smoke.spec.js
       - name: Test deterministic simulation
         run: npm run test:simulation
@@ -78,6 +79,8 @@ jobs:
         run: npm run build
       - name: Validate production output
         run: npm run verify:build
+      - name: Validate production deployment configuration
+        run: npm run verify:deploy
       - name: Build Cloudflare Worker
         run: npm run build:server
       - name: Smoke test Chromium

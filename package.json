@@ -10,6 +10,7 @@
     "check": "node scripts/verify-assets.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "test:smoke": "playwright test",
+    "verify:deploy": "node scripts/verify-deployment-config.mjs",
     "test:simulation": "node --test tests/simulation.test.js",
     "test:session": "node --test tests/session.test.js",
     "test:room": "node --test tests/room.test.js tests/multiplayer-protocol.test.js tests/worker.test.js tests/raid-room.test.js",
@@ -18,7 +19,8 @@
     "test:authoritative-room": "node --test tests/authoritative-match-host.test.js tests/raid-room.test.js",
     "test:network-session": "node --test tests/network-session.test.js tests/network-view.test.js",
     "dev:server": "npx --yes wrangler@4.33.1 dev",
-    "build:server": "npx --yes wrangler@4.33.1 deploy --dry-run --outdir dist-worker"
+    "build:server": "npx --yes wrangler@4.33.1 deploy --dry-run --outdir dist-worker",
+    "deploy": "npm run build && npm run verify:build && npm run verify:deploy && npx --yes wrangler@4.33.1 deploy"
   },
   "devDependencies": {
     "vite": "7.1.3",
