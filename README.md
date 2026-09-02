@@ -59,7 +59,7 @@ Attachments contain only `connectionId`, authoritative `slot`, `lastInputSeq`, `
 
 The pure, authoritative `MultiplayerBossSimulation` now supplies a deterministic two-Raider Warden-X gameplay core. It owns a shared canonical boss and world, independent slot-ordered player resources and combat, stable monotonic entity IDs, copied JSON snapshots/events, and a server-supplied `step(dt)` boundary with a recommended fixed 30 Hz tick. Boss targeting uses deterministic round-robin selection over living Raiders in slot order.
 
-The browser `NetworkGameSession` creates or joins a room through the Worker, accepts its slot only from `welcome`, and renders the latest raw 30 Hz authoritative `state-frame`. Co-op is boss-only: the server owns all gameplay and the browser performs no multiplayer simulation. There is no prediction, interpolation, reconnect, Telegram, multiplayer Stage 1, or active-match persistence. The complete offline v0.5 single-player path remains the unchanged default at `/`.
+The browser `NetworkGameSession` creates or joins a room through the Worker, accepts its slot only from `welcome`, and consumes the 30 Hz authoritative `state-frame`. Co-op is boss-only: the server owns all gameplay, while the presentation layer predicts local movement and interpolates remote movement without changing canonical state. There is no reconnect, Telegram, multiplayer Stage 1, or active-match persistence. The complete offline v0.5 single-player path remains the unchanged default at `/`.
 
 ### Local two-tab co-op
 
@@ -91,6 +91,7 @@ npm run test:authoritative-room
 npm run test:network-session
 npm run build
 npm run verify:build
+npm run verify:deploy
 npm run build:server
 npm run test:smoke
 ```
@@ -105,6 +106,33 @@ The Node simulation suite requires no DOM, Canvas, or Playwright. The Chromium s
 - **G:** grenade
 - **Touch controls:** movement, fire, dash, grenade, pause, and restart
 
-## Scope and deployment
+## Production deployment
+
+The production deployment is one Cloudflare Worker origin. Cloudflare Static Assets serves the Vite output in `dist/` (including SPA navigation fallback), while `/api/*` runs the Worker first so room creation, API errors, and WebSocket upgrades reach `server/worker.js` and the `RAID_ROOMS` Durable Object binding. The browser continues to derive HTTP and WebSocket URLs from `window.location.origin`; HTTPS therefore selects WSS without a separate API host or CORS.
+
+Install dependencies (`npm ci` for a lockfile-exact clean install, or `npm install` during local development) and deploy with a Cloudflare-authenticated Wrangler session:
+
+```sh
+npm ci
+npm run deploy
+```
+
+`npm run deploy` builds the client, verifies the production output and deployment configuration, and then deploys with the pinned Wrangler version. `dist/` is generated for deployment and is not committed.
+
+For the first Internet co-op test, open this on Device A:
+
+```text
+https://<origin>/?coop=create
+```
+
+After room creation changes the address, copy the complete resulting URL:
+
+```text
+https://<origin>/?coop=join&room=<roomId>
+```
+
+Open that exact URL on Device B. The devices should receive slots 1 and 2 and share one Warden-X, with responsive local prediction, smooth remote interpolation, shared authoritative boss HP, and server-authoritative resources and damage. An active disconnect aborts the match; connecting a replacement player starts a fresh match.
+
+## Scope
 
 There are no intentional changes to controls, balance, assets, enemy behavior, stage progression, or Warden-X thresholds and patterns. The server foundation does not add client networking, multiplayer simulation, persistence, Telegram SDK, or Telegram integration. The production client retains its origin-root (`base: '/'`) deployment contract.
