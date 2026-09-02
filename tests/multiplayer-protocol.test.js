@@ -4,18 +4,20 @@ import {
   MULTIPLAYER_PROTOCOL_VERSION,
   createErrorMessage,
   createInputAckMessage,
+  createMatchAbortedMessage,
+  createStateFrameMessage,
   createRosterMessage,
   createWelcomeMessage,
   validateCommand,
   validateInputMessage,
 } from '../src/game/network/protocol.js';
 
-const input = (command, overrides = {}) => ({ version: 1, type: 'input', seq: 0, command, ...overrides });
+const input = (command, overrides = {}) => ({ version: 2, type: 'input', matchId: 'match', seq: 0, command, ...overrides });
 
-test('protocol version one is supported and other versions are rejected', () => {
-  assert.equal(MULTIPLAYER_PROTOCOL_VERSION, 1);
+test('protocol version two is supported and version one is rejected', () => {
+  assert.equal(MULTIPLAYER_PROTOCOL_VERSION, 2);
   assert.equal(validateInputMessage(input({ type: 'dash' })).ok, true);
-  assert.deepEqual(validateInputMessage(input({ type: 'dash' }, { version: 2 })), {
+  assert.deepEqual(validateInputMessage(input({ type: 'dash' }, { version: 1 })), {
     ok: false, code: 'unsupported-version',
   });
 });
@@ -38,14 +40,18 @@ test('input envelopes reject malformed JSON-equivalent values and client timing'
     null, [], 'input', input({ type: 'dash' }, { seq: -1 }), input({ type: 'dash' }, { seq: 1.5 }),
     input({ type: 'dash' }, { seq: Number.MAX_SAFE_INTEGER + 1 }),
     { ...input({ type: 'dash' }), dt: 0.016 },
-    { version: 1, type: 'roster', seq: 0, command: { type: 'dash' } },
+    { version: 2, type: 'roster', matchId: 'match', seq: 0, command: { type: 'dash' } },
+    { version: 2, type: 'input', seq: 0, command: { type: 'dash' } },
+    input({ type: 'dash' }, { matchId: '' }), { ...input({ type: 'dash' }), slot: 2 },
   ]) assert.equal(validateInputMessage(message).ok, false);
 });
 
 test('server envelope constructors produce serializable versioned messages', () => {
   const messages = [
     createWelcomeMessage('room', 'connection', 1, 2),
-    createInputAckMessage(7),
+    createInputAckMessage('match', 7),
+    createMatchAbortedMessage('match', 'player-left'),
+    createStateFrameMessage('match', { tick: 3, status: 'active' }, [{ type: 'event' }]),
     createRosterMessage(2, [{ connectionId: 'connection', slot: 1, lastInputSeq: 9 }]),
     createErrorMessage('invalid-json', 'Message must be valid JSON.'),
   ];
@@ -53,5 +59,17 @@ test('server envelope constructors produce serializable versioned messages', () 
     assert.equal(message.version, MULTIPLAYER_PROTOCOL_VERSION);
     assert.deepEqual(JSON.parse(JSON.stringify(message)), message);
   }
-  assert.deepEqual(messages[2].players, [{ connectionId: 'connection', slot: 1 }]);
+  assert.deepEqual(messages[4].players, [{ connectionId: 'connection', slot: 1 }]);
+  assert.deepEqual(messages[1], { version: 2, type: 'input-ack', matchId: 'match', seq: 7 });
+  assert.equal(messages[3].tick, messages[3].snapshot.tick);
+});
+
+test('state frames copy their JSON payloads and reject invalid data', () => {
+  const snapshot = { tick: 0, values: [1] }, events = [{ type: 'match-started' }];
+  const frame = createStateFrameMessage('match', snapshot, events);
+  snapshot.values.push(2); events[0].type = 'changed';
+  assert.deepEqual(frame.snapshot.values, [1]); assert.equal(frame.events[0].type, 'match-started');
+  assert.throws(() => createStateFrameMessage('match', { tick: NaN }, []), TypeError);
+  assert.throws(() => createStateFrameMessage('match', { tick: 0, bad: new Set() }, []), TypeError);
+  assert.throws(() => createStateFrameMessage('match', { tick: 0 }, new Map()), TypeError);
 });

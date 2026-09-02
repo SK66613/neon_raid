@@ -1,78 +1,114 @@
 import { RoomCoordinator, ROOM_CAPACITY } from './room/RoomCoordinator.js';
+import { AuthoritativeMatchHost } from './room/AuthoritativeMatchHost.js';
+import { MULTIPLAYER_TICK_DT } from '../src/game/multiplayer/config.js';
+import { createSeededRng } from '../src/game/simulation/rng.js';
 import {
-  MAX_MULTIPLAYER_MESSAGE_BYTES,
-  createErrorMessage,
-  createInputAckMessage,
-  createRosterMessage,
-  createWelcomeMessage,
-  validateInputMessage,
+  MAX_MULTIPLAYER_MESSAGE_BYTES, createErrorMessage, createInputAckMessage,
+  createMatchAbortedMessage, createRosterMessage, createWelcomeMessage, validateInputMessage,
 } from '../src/game/network/protocol.js';
 
-const json = (message) => JSON.stringify(message);
+const json = message => JSON.stringify(message);
+const seedFrom = value => { let seed = 2166136261; for (const char of value) seed = Math.imul(seed ^ char.charCodeAt(0), 16777619); return seed >>> 0; };
 
 export class RaidRoom {
-  constructor(ctx) {
+  constructor(ctx, options = {}) {
     this.ctx = ctx;
+    this.scheduler = options.scheduler ?? { setInterval: globalThis.setInterval.bind(globalThis), clearInterval: globalThis.clearInterval.bind(globalThis) };
+    this.createMatchId = options.createMatchId ?? (() => crypto.randomUUID());
+    this.createHost = options.createHost ?? (matchId => new AuthoritativeMatchHost({ matchId, rng: createSeededRng(seedFrom(matchId)) }));
+    this.host = null;
+    this.timer = null;
+    this.failClosedStaleAttachments();
   }
 
-  coordinator() {
-    const members = this.ctx.getWebSockets().map((socket) => socket.deserializeAttachment()).filter(Boolean);
-    return new RoomCoordinator(members);
+  failClosedStaleAttachments() {
+    const stale = this.ctx.getWebSockets().filter(socket => socket.deserializeAttachment()?.matchState === 'active');
+    const matchIds = [...new Set(stale.map(socket => socket.deserializeAttachment()?.matchId).filter(Boolean))];
+    for (const matchId of matchIds) {
+      const encoded = json(createMatchAbortedMessage(matchId, 'server-error'));
+      for (const socket of stale) if (socket.deserializeAttachment()?.matchId === matchId) socket.send(encoded);
+    }
+    for (const socket of stale) this.updateAttachment(socket, { matchId: null, matchState: 'waiting' });
   }
+
+  coordinator() { return new RoomCoordinator(this.ctx.getWebSockets().map(socket => socket.deserializeAttachment()).filter(Boolean)); }
 
   async fetch(request) {
-    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
-      return new Response('WebSocket upgrade required', { status: 426 });
-    }
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('WebSocket upgrade required', { status: 426 });
     const coordinator = this.coordinator();
-    if (coordinator.size >= ROOM_CAPACITY) {
-      return Response.json({ error: 'room-full', capacity: ROOM_CAPACITY }, { status: 409 });
-    }
+    if (coordinator.size >= ROOM_CAPACITY) return Response.json({ error: 'room-full', capacity: ROOM_CAPACITY }, { status: 409 });
     const connectionId = crypto.randomUUID();
     const joined = coordinator.join(connectionId);
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-    server.serializeAttachment(joined.member);
+    const pair = new WebSocketPair(); const [client, server] = Object.values(pair);
+    server.serializeAttachment({ ...joined.member, matchId: null, matchState: 'waiting' });
     this.ctx.acceptWebSocket(server);
     const roomId = new URL(request.url).searchParams.get('roomId');
     server.send(json(createWelcomeMessage(roomId, connectionId, joined.member.slot, ROOM_CAPACITY)));
     this.broadcastRoster();
+    if (this.ctx.getWebSockets().length === ROOM_CAPACITY && !this.host) this.startMatch();
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  startMatch() {
+    if (this.host || this.timer || this.ctx.getWebSockets().length !== ROOM_CAPACITY) return;
+    const matchId = this.createMatchId(); this.host = this.createHost(matchId);
+    for (const socket of this.ctx.getWebSockets()) this.updateAttachment(socket, { matchId, matchState: 'active' });
+    this.broadcast(this.host.initialFrame());
+    this.timer = this.scheduler.setInterval(() => this.runAuthoritativeTick(), MULTIPLAYER_TICK_DT * 1000);
+  }
+
+  runAuthoritativeTick() {
+    if (!this.host) return;
+    try {
+      const frame = this.host.tick(); this.broadcast(frame);
+      if (frame.snapshot.status === 'won' || frame.snapshot.status === 'lost') {
+        this.stopTimer();
+        for (const socket of this.ctx.getWebSockets()) this.updateAttachment(socket, { matchState: 'complete' });
+      }
+    } catch { this.abortMatch('server-error'); }
   }
 
   webSocketMessage(socket, payload) {
     if (typeof payload !== 'string') return this.sendError(socket, 'invalid-message', 'Text JSON messages are required.');
-    if (new TextEncoder().encode(payload).byteLength > MAX_MULTIPLAYER_MESSAGE_BYTES) {
-      return this.sendError(socket, 'message-too-large', 'Message exceeds 4096 bytes.');
-    }
-    let message;
-    try { message = JSON.parse(payload); } catch { return this.sendError(socket, 'invalid-json', 'Message must be valid JSON.'); }
-    const validation = validateInputMessage(message);
-    if (!validation.ok) return this.sendError(socket, validation.code, 'Message was rejected.');
+    if (new TextEncoder().encode(payload).byteLength > MAX_MULTIPLAYER_MESSAGE_BYTES) return this.sendError(socket, 'message-too-large', 'Message exceeds 4096 bytes.');
+    let message; try { message = JSON.parse(payload); } catch { return this.sendError(socket, 'invalid-json', 'Message must be valid JSON.'); }
+    const validation = validateInputMessage(message); if (!validation.ok) return this.sendError(socket, validation.code, 'Message was rejected.');
     const attachment = socket.deserializeAttachment();
-    const coordinator = this.coordinator();
-    const accepted = coordinator.acceptInput(attachment?.connectionId, message.seq);
+    if (attachment?.matchState === 'active' && !this.host) {
+      this.updateAttachment(socket, { matchId: null, matchState: 'waiting' });
+      return this.sendError(socket, 'match-not-active', 'No authoritative match is active.');
+    }
+    if (!this.host || attachment?.matchState !== 'active') return this.sendError(socket, 'match-not-active', 'No authoritative match is active.');
+    if (message.matchId !== this.host.getMatchId()) return this.sendError(socket, 'stale-match', 'Input belongs to another match.');
+    const accepted = this.coordinator().acceptInput(attachment?.connectionId, message.seq);
     if (!accepted.ok) return this.sendError(socket, accepted.reason, 'Input sequence was rejected.');
-    socket.serializeAttachment(accepted.member);
-    socket.send(json(createInputAckMessage(message.seq)));
+    this.host.applyCommand(attachment.slot, message.command);
+    socket.serializeAttachment({ ...attachment, ...accepted.member });
+    socket.send(json(createInputAckMessage(message.matchId, message.seq)));
   }
 
-  webSocketClose(socket) {
+  webSocketClose(socket) { this.handleDeparture(socket); }
+  webSocketError(socket) { try { socket.close(1011, 'WebSocket error'); } catch {} this.handleDeparture(socket); }
+  handleDeparture(socket) {
+    const attachment = socket.deserializeAttachment();
+    if (attachment?.matchState === 'active') this.abortMatch('player-left');
+    else if (attachment?.matchState === 'complete') { this.stopTimer(); this.host = null; this.markWaiting(); }
     this.broadcastRoster(socket);
   }
-
-  webSocketError(socket) {
-    try { socket.close(1011, 'WebSocket error'); } catch {}
-    this.broadcastRoster(socket);
+  abortMatch(reason) {
+    const matchId = this.host?.getMatchId() ?? this.ctx.getWebSockets().map(s => s.deserializeAttachment()?.matchId).find(Boolean);
+    this.stopTimer(); this.host = null;
+    if (matchId) this.broadcast(createMatchAbortedMessage(matchId, reason));
+    this.markWaiting();
   }
-
+  markWaiting() { for (const socket of this.ctx.getWebSockets()) this.updateAttachment(socket, { matchId: null, matchState: 'waiting' }); }
+  stopTimer() { if (this.timer !== null) this.scheduler.clearInterval(this.timer); this.timer = null; }
+  updateAttachment(socket, patch) { socket.serializeAttachment({ ...socket.deserializeAttachment(), ...patch }); }
   sendError(socket, code, message) { socket.send(json(createErrorMessage(code, message))); }
-
+  broadcast(message) { const encoded = json(message); for (const socket of this.ctx.getWebSockets()) socket.send(encoded); }
   broadcastRoster(excludedSocket = null) {
-    const sockets = this.ctx.getWebSockets().filter((socket) => socket !== excludedSocket);
-    const players = sockets.map((socket) => socket.deserializeAttachment()).filter(Boolean);
-    const coordinator = new RoomCoordinator(players);
-    const message = json(createRosterMessage(ROOM_CAPACITY, coordinator.roster()));
-    for (const socket of sockets) socket.send(message);
+    const sockets = this.ctx.getWebSockets().filter(socket => socket !== excludedSocket);
+    const coordinator = new RoomCoordinator(sockets.map(socket => socket.deserializeAttachment()).filter(Boolean));
+    const message = json(createRosterMessage(ROOM_CAPACITY, coordinator.roster())); for (const socket of sockets) socket.send(message);
   }
 }

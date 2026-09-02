@@ -13,9 +13,9 @@ LocalGameSession
   ↓
 single-player GameSimulation
 
-Future network path:
+Server path (the browser client remains future work):
 
-NetworkGameSession
+Browser client (future NetworkGameSession)
   ↓
 WebSocket
   ↓
@@ -23,8 +23,8 @@ Worker
   ↓
 RaidRoom Durable Object
   ↓
-future authoritative tick host
-  ↓
+AuthoritativeMatchHost
+  ↓ fixed 30 Hz tick
 MultiplayerBossSimulation
 ```
 
@@ -51,11 +51,15 @@ The protocol's `FRAME` message and its `dt` are local simulation-host controls o
 
 The Cloudflare Worker exposes `POST /api/rooms` and `GET /api/rooms/:roomId/ws`. Each room ID is an opaque, server-issued Durable Object unique ID: creation uses `RAID_ROOMS.newUniqueId()`, while joins validate the capability with `idFromString()` before resolving the matching `RaidRoom`. No room registry, D1, or KV is needed. A room accepts at most two anonymous connections, assigns reusable slots and temporary connection IDs on the server, ingests only validated and sequenced player-intent commands, and broadcasts a stable roster.
 
-The multiplayer protocol is distinct from the local `FRAME` protocol. It accepts only `move`, `fire`, `dash`, and `grenade`; it never accepts browser `dt`, positions, HP, or damage results. The server will own gameplay time when authoritative simulation is introduced. Durable Object WebSocket attachments hold each connection's ID, slot, and last accepted sequence, allowing the room to rebuild its roster with `ctx.getWebSockets()` after hibernation without an always-awake timer.
+The multiplayer protocol is distinct from the local `FRAME` protocol. Its version 2 input envelope binds commands to a server-generated match ID and accepts only `move`, `fire`, `dash`, and `grenade`; it never accepts browser `dt`, slots, positions, HP, or damage results. The slot comes from the WebSocket attachment. An ACK means a correctly matched, fresh command was accepted into the gameplay domain; a dead player's command can still be consumed and ACKed even when the simulation intentionally has no effect. Each fixed tick broadcasts one atomic, copied `state-frame` containing the snapshot and events drained for that tick.
+
+One connected Raider waits with no timer, so the object may hibernate. Exactly two Raiders create a fresh match and one fixed 30 Hz interval; this intentionally holds the Durable Object in memory while gameplay is active. A win or loss broadcasts its final frame, marks attachments complete, and stops the timer so hibernation is possible again. An active disconnect aborts the match with `player-left`, discards the host, stops the timer, and returns the survivor to waiting; a replacement starts a new match ID. Input while waiting or complete is rejected, and delayed input for an old match is rejected as `stale-match` without consuming its sequence.
+
+Attachments contain only `connectionId`, authoritative `slot`, `lastInputSeq`, `matchId`, and `matchState`; canonical gameplay exists only in the in-memory host. Active-match continuity through runtime shutdown, deployment, or machine restart is **not guaranteed**. A stale active attachment without its in-memory host fails closed rather than fabricating recovery. Reconnect recovery and canonical gameplay persistence/replay are deferred.
 
 The pure, authoritative `MultiplayerBossSimulation` now supplies a deterministic two-Raider Warden-X gameplay core. It owns a shared canonical boss and world, independent slot-ordered player resources and combat, stable monotonic entity IDs, copied JSON snapshots/events, and a server-supplied `step(dt)` boundary with a recommended fixed 30 Hz tick. Boss targeting uses deterministic round-robin selection over living Raiders in slot order.
 
-This core is **not wired into `RaidRoom` yet** and the client still does **not use WebSocket or a `NetworkGameSession`**. Multiplayer Stage 1, Telegram identity, and revive/reconnect gameplay are not implemented. The complete offline v0.5 single-player path remains unchanged.
+The core is now wired into `RaidRoom`, but there is still **no browser WebSocket client or `NetworkGameSession`**. Multiplayer Stage 1, Telegram, reconnect/recovery, and active gameplay persistence are not implemented. The complete offline v0.5 single-player path remains unchanged.
 
 ## Development and validation
 
@@ -67,6 +71,7 @@ npm run test:simulation
 npm run test:session
 npm run test:room
 npm run test:multiplayer-simulation
+npm run test:authoritative-room
 npm run build
 npm run verify:build
 npm run build:server
