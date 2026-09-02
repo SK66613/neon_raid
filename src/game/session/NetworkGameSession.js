@@ -104,6 +104,11 @@ export class NetworkGameSession extends GameSession {
       this.#status = SessionStatus.WAITING;
     } else if (message.type === 'roster') {
       this.#info.peerCount = message.players.length;
+      if (this.#status === SessionStatus.COMPLETE && message.players.length < message.capacity) {
+        if (this.#info.matchId) this.#abortedMatches.add(this.#info.matchId);
+        this.#info.matchId = null; this.#info.lastServerTick = null;
+        this.#snapshot = null; this.#outbound = []; this.#status = SessionStatus.WAITING;
+      }
     } else if (message.type === 'state-frame') {
       this.#acceptFrame(message);
     } else if (message.type === 'input-ack') {

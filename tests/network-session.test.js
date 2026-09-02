@@ -110,6 +110,31 @@ test('terminal frames complete and stop new gameplay input', async () => {
   assert.equal(session.getStatus(), SessionStatus.COMPLETE); session.submit({ type: 'dash' }); session.update(0); assert.equal(socket.sent.length, 0);
 });
 
+test('completed room vacancy waits for a replacement and accepts a fresh match without resetting sequence', async () => {
+  const { session, socket } = await setup(); socket.emit('message', frame('match-a', 0));
+  session.submit({ type: 'dash' }); session.update(0); assert.equal(socket.sent[0].seq, 0);
+  socket.emit('message', frame('match-a', 1, 'won'));
+  assert.equal(session.getStatus(), SessionStatus.COMPLETE); assert.equal(session.getSnapshot().status, 'won');
+
+  socket.emit('message', message('roster', { capacity: 2, players: [
+    { connectionId: 'peer-one', slot: 1 }, { connectionId: 'server-choice', slot: 2 },
+  ] }));
+  assert.equal(session.getStatus(), SessionStatus.COMPLETE); assert.equal(session.getConnectionInfo().matchId, 'match-a');
+
+  socket.emit('message', message('roster', { capacity: 2, players: [{ connectionId: 'server-choice', slot: 2 }] }));
+  assert.equal(session.getStatus(), SessionStatus.WAITING); assert.equal(session.getSnapshot(), null);
+  assert.deepEqual(session.getConnectionInfo(), { roomId, connectionId: 'server-choice', slot: 2, capacity: 2,
+    matchId: null, peerCount: 1, lastServerTick: null, lastAckSeq: null });
+
+  socket.emit('message', frame('match-a', 2));
+  assert.equal(session.getStatus(), SessionStatus.WAITING); assert.equal(session.getSnapshot(), null);
+  socket.emit('message', frame('match-b', 0));
+  assert.equal(session.getStatus(), SessionStatus.READY); assert.equal(session.getConnectionInfo().matchId, 'match-b');
+  assert.equal(session.getConnectionInfo().lastServerTick, 0);
+  session.submit({ type: 'grenade' }); session.update(0);
+  assert.equal(socket.sent.at(-1).seq, 1); assert.equal(socket.sent.at(-1).matchId, 'match-b');
+});
+
 test('a local death frame drops queued input and rejects every gameplay command', async () => {
   const { session, socket } = await setup(); socket.emit('message', frame('m1', 0));
   session.submit({ type: 'move', x: 1, y: 0 }); session.submit({ type: 'fire', active: true });
