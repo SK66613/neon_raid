@@ -52,6 +52,7 @@ export class NetworkGameSession extends GameSession {
 
   submit(command) {
     if (!validateCommand(command) || ![SessionStatus.WAITING, SessionStatus.READY].includes(this.#status)) return false;
+    if (this.#status === SessionStatus.READY && !this.#localPlayerAlive()) return false;
     const value = copy(command);
     if (value.type === 'move' || value.type === 'fire') {
       const previous = this.#desired[value.type];
@@ -66,6 +67,7 @@ export class NetworkGameSession extends GameSession {
 
   update(_dt) {
     if (this.#status !== SessionStatus.READY || this.#socket?.readyState !== 1 || !this.#info.matchId) return;
+    if (!this.#localPlayerAlive()) { this.#outbound = []; return; }
     for (const command of this.#outbound.splice(0)) {
       const envelope = { version: MULTIPLAYER_PROTOCOL_VERSION, type: 'input', matchId: this.#info.matchId,
         seq: this.#seq++, command: copy(command) };
@@ -129,6 +131,7 @@ export class NetworkGameSession extends GameSession {
       if (this.#desired.fire) this.#outbound.push(copy(this.#desired.fire));
     }
     this.#snapshot = copy(message.snapshot); this.#events.push(...copy(message.events));
+    if (!this.#localPlayerAlive()) this.#outbound = [];
     this.#info.lastServerTick = message.tick;
     this.#status = message.snapshot.status === 'won' || message.snapshot.status === 'lost'
       ? SessionStatus.COMPLETE : SessionStatus.READY;
@@ -145,6 +148,10 @@ export class NetworkGameSession extends GameSession {
     if (this.#explicitClose || this.#status === SessionStatus.CLOSED || this.#status === SessionStatus.ERROR) return;
     this.#outbound = []; this.#status = SessionStatus.ERROR;
     this.#events.push({ type: 'network-disconnected', reason });
+  }
+
+  #localPlayerAlive() {
+    return this.#snapshot?.players?.find(player => player.slot === this.#info.slot)?.alive === true;
   }
 
   #fail(message) { this.#status = SessionStatus.ERROR; return new Error(message); }

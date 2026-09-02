@@ -2,13 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createNetworkGameSession } from '../src/game/session/NetworkGameSession.js';
 import { SessionStatus } from '../src/game/session/GameSession.js';
+import { createMultiplayerBossState } from '../src/game/multiplayer/createMultiplayerBossState.js';
 
 const roomId = 'a'.repeat(64);
-const player = slot => ({ slot, x: slot * 10, y: 20, radius: 12, vx: 0, vy: 0, hp: 100, armor: 40,
-  ammo: 24, reserveAmmo: 96, grenades: 3, dashCooldown: 0, hitTimer: 0, dashTimer: 0,
-  alive: true, firing: false, lastDirection: 'n', aimDirection: 'n' });
-const snapshot = (tick, status = 'active') => ({ tick, status, players: [player(1), player(2)], boss: { id: 'warden-x', hp: 1200 },
-  bullets: [], enemyBullets: [], dangerZones: [], medkits: [], nextEntityId: 1 });
+const snapshot = (tick, status = 'active') => ({ ...createMultiplayerBossState(), tick, status });
 const message = (type, detail = {}) => ({ version: 2, type, ...detail });
 
 class FakeSocket {
@@ -60,7 +57,7 @@ test('welcome captures authoritative slot and connection metadata while waiting'
 test('frames are copied, events are owned, and ticks increase monotonically', async () => {
   const { session, socket } = await setup(); socket.emit('message', frame('m1', 0, 'active', [{ type: 'shot-fired', slot: 1 }]));
   assert.equal(session.getStatus(), SessionStatus.READY); const first = session.getSnapshot(); first.players[0].x = 999;
-  assert.equal(session.getSnapshot().players[0].x, 10);
+  assert.equal(session.getSnapshot().players[0].x, 145);
   const events = session.drainEvents(); events[0].type = 'changed'; assert.deepEqual(session.drainEvents(), []);
   socket.emit('message', frame('m1', 0)); socket.emit('message', frame('m1', 1)); socket.emit('message', frame('m1', 0));
   assert.equal(session.getSnapshot().tick, 1); assert.equal(session.getConnectionInfo().lastServerTick, 1);
@@ -111,6 +108,26 @@ test('ACK bookkeeping accepts only increasing ACKs for the current match', async
 test('terminal frames complete and stop new gameplay input', async () => {
   const { session, socket } = await setup(); socket.emit('message', frame('m1', 0, 'won'));
   assert.equal(session.getStatus(), SessionStatus.COMPLETE); session.submit({ type: 'dash' }); session.update(0); assert.equal(socket.sent.length, 0);
+});
+
+test('a local death frame drops queued input and rejects every gameplay command', async () => {
+  const { session, socket } = await setup(); socket.emit('message', frame('m1', 0));
+  session.submit({ type: 'move', x: 1, y: 0 }); session.submit({ type: 'fire', active: true });
+  session.submit({ type: 'dash' }); session.submit({ type: 'grenade' });
+  const dead = snapshot(1); dead.players.find(player => player.slot === 2).alive = false;
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 1, snapshot: dead, events: [] }));
+  session.update(0); assert.equal(socket.sent.length, 0);
+  for (const command of [{ type: 'move', x: -1, y: 0 }, { type: 'fire', active: false }, { type: 'dash' }, { type: 'grenade' }]) {
+    assert.equal(session.submit(command), false);
+  }
+  session.update(0); assert.equal(socket.sent.length, 0); assert.equal(session.getStatus(), SessionStatus.READY);
+});
+
+test('a malformed authoritative frame fails closed at the session boundary', async () => {
+  const { session, socket } = await setup(); const malformed = snapshot(0); delete malformed.boss;
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 0, snapshot: malformed, events: [] }));
+  assert.equal(session.getStatus(), SessionStatus.ERROR); assert.equal(socket.closeArgs[0], 1002);
+  assert.equal(session.drainEvents()[0].type, 'network-error');
 });
 
 test('server errors are copied lifecycle events', async () => {

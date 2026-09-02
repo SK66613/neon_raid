@@ -60,11 +60,64 @@ const jsonCopy = (value, label) => {
 const validString = value => typeof value === 'string' && value.length > 0;
 const validSlot = value => value === 1 || value === 2;
 const validCapacity = value => value === 2;
-const validPlayer = player => isRecord(player) && validSlot(player.slot)
-  && ['x', 'y', 'radius', 'vx', 'vy', 'hp', 'armor', 'ammo', 'reserveAmmo', 'grenades',
-    'dashCooldown', 'hitTimer', 'dashTimer'].every(key => typeof player[key] === 'number' && Number.isFinite(player[key]))
+const finiteFields = (value, fields) => fields.every(key => typeof value[key] === 'number' && Number.isFinite(value[key]));
+const nonNegativeFields = (value, fields) => fields.every(key => value[key] >= 0);
+const DIRECTIONS = new Set(['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']);
+const PLAYER_KEYS = ['slot', 'x', 'y', 'radius', 'vx', 'vy', 'speed', 'moveX', 'moveY', 'aimDirection',
+  'lastDirection', 'hp', 'maxHp', 'armor', 'maxArmor', 'ammo', 'reserveAmmo', 'grenades', 'fireCooldown',
+  'reloadTimer', 'dashTimer', 'dashCooldown', 'hitTimer', 'firing', 'alive', 'pendingActions'];
+const PLAYER_NUMBERS = ['x', 'y', 'radius', 'vx', 'vy', 'speed', 'moveX', 'moveY', 'hp', 'maxHp', 'armor',
+  'maxArmor', 'ammo', 'reserveAmmo', 'grenades', 'fireCooldown', 'reloadTimer', 'dashTimer', 'dashCooldown', 'hitTimer'];
+const PLAYER_NON_NEGATIVE = ['radius', 'speed', 'hp', 'maxHp', 'armor', 'maxArmor', 'ammo', 'reserveAmmo',
+  'grenades', 'fireCooldown', 'reloadTimer', 'dashTimer', 'dashCooldown', 'hitTimer'];
+const validPlayer = player => isRecord(player) && hasExactKeys(player, PLAYER_KEYS) && validSlot(player.slot)
+  && finiteFields(player, PLAYER_NUMBERS) && nonNegativeFields(player, PLAYER_NON_NEGATIVE)
+  && player.hp <= player.maxHp && player.armor <= player.maxArmor
+  && DIRECTIONS.has(player.lastDirection) && DIRECTIONS.has(player.aimDirection)
   && typeof player.alive === 'boolean' && typeof player.firing === 'boolean'
-  && validString(player.lastDirection) && validString(player.aimDirection);
+  && Array.isArray(player.pendingActions) && player.pendingActions.every(action => action === 'dash' || action === 'grenade');
+
+const BOSS_KEYS = ['id', 'x', 'y', 'radius', 'hp', 'maxHp', 'phase', 'frameTimer', 'attackTimer', 'attackFrame',
+  'flashTimer', 'moveTimer', 'smokeTimer', 'targetCursor'];
+const BOSS_NUMBERS = BOSS_KEYS.filter(key => !['id', 'phase'].includes(key));
+const validBoss = boss => isRecord(boss) && hasExactKeys(boss, BOSS_KEYS) && boss.id === 'warden-x'
+  && finiteFields(boss, BOSS_NUMBERS) && [1, 2, 3].includes(boss.phase)
+  && boss.radius >= 0 && boss.hp >= 0 && boss.maxHp >= 0 && boss.hp <= boss.maxHp
+  && boss.frameTimer >= 0 && boss.flashTimer >= 0 && boss.moveTimer >= 0 && boss.smokeTimer >= 0
+  && Number.isSafeInteger(boss.targetCursor) && boss.targetCursor >= 0;
+
+const validEntity = (entity, keys, numericFields) => isRecord(entity) && hasExactKeys(entity, keys)
+  && validString(entity.id) && finiteFields(entity, numericFields);
+const validPlayerBullet = bullet => validEntity(bullet,
+  ['id', 'ownerSlot', 'x', 'y', 'vx', 'vy', 'life', 'damage'], ['x', 'y', 'vx', 'vy', 'life', 'damage'])
+  && validSlot(bullet.ownerSlot);
+const validEnemyBullet = bullet => validEntity(bullet,
+  bullet?.targetSlot === undefined
+    ? ['id', 'x', 'y', 'vx', 'vy', 'life', 'radius', 'damage']
+    : ['id', 'x', 'y', 'vx', 'vy', 'life', 'radius', 'damage', 'targetSlot'],
+  ['x', 'y', 'vx', 'vy', 'life', 'radius', 'damage'])
+  && (bullet.targetSlot === undefined || validSlot(bullet.targetSlot));
+const validDangerZone = zone => validEntity(zone,
+  ['id', 'x', 'y', 'radius', 'delay', 'life', 'exploded', 'targetSlot'], ['x', 'y', 'radius', 'delay', 'life'])
+  && typeof zone.exploded === 'boolean' && validSlot(zone.targetSlot);
+const validMedkit = medkit => validEntity(medkit, ['id', 'x', 'y', 'alive'], ['x', 'y'])
+  && typeof medkit.alive === 'boolean';
+
+export function validateAuthoritativeSnapshot(snapshot) {
+  if (!isRecord(snapshot) || !hasExactKeys(snapshot,
+    ['tick', 'status', 'players', 'boss', 'bullets', 'enemyBullets', 'dangerZones', 'medkits', 'nextEntityId'])) return false;
+  return Number.isSafeInteger(snapshot.tick) && snapshot.tick >= 0
+    && ['active', 'won', 'lost'].includes(snapshot.status)
+    && Number.isSafeInteger(snapshot.nextEntityId) && snapshot.nextEntityId >= 1
+    && Array.isArray(snapshot.players) && snapshot.players.length === 2 && snapshot.players.every(validPlayer)
+    && new Set(snapshot.players.map(player => player.slot)).size === 2
+    && snapshot.players.some(player => player.slot === 1) && snapshot.players.some(player => player.slot === 2)
+    && validBoss(snapshot.boss)
+    && Array.isArray(snapshot.bullets) && snapshot.bullets.every(validPlayerBullet)
+    && Array.isArray(snapshot.enemyBullets) && snapshot.enemyBullets.every(validEnemyBullet)
+    && Array.isArray(snapshot.dangerZones) && snapshot.dangerZones.every(validDangerZone)
+    && Array.isArray(snapshot.medkits) && snapshot.medkits.every(validMedkit);
+}
 
 export function validateServerMessage(message) {
   if (!isRecord(message)) return { ok: false, code: 'invalid-message' };
@@ -91,11 +144,7 @@ export function validateServerMessage(message) {
       const snapshot = message.snapshot;
       valid = hasExactKeys(message, ['version', 'type', 'matchId', 'tick', 'snapshot', 'events'])
         && validString(message.matchId) && Number.isSafeInteger(message.tick) && message.tick >= 0
-        && isJsonData(snapshot) && isRecord(snapshot) && snapshot.tick === message.tick
-        && Array.isArray(snapshot.players) && snapshot.players.length === 2
-        && snapshot.players.every(validPlayer)
-        && new Set(snapshot.players.map(player => player.slot)).size === 2
-        && snapshot.players.some(player => player.slot === 1) && snapshot.players.some(player => player.slot === 2)
+        && isJsonData(snapshot) && validateAuthoritativeSnapshot(snapshot) && snapshot.tick === message.tick
         && Array.isArray(message.events) && isJsonData(message.events);
       break;
     }

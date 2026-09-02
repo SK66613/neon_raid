@@ -67,7 +67,8 @@ export function startGame() {
         if (event.type === 'reload-completed'&&localEvent) { const snapshot=session.getSnapshot();ui.status.textContent=networkMode?`Warden-X: ${Math.ceil(snapshot.boss.hp)} HP`:snapshot.stage===1?'Сектор активен.':`Warden-X: ${Math.ceil(snapshot.boss.hp)} HP`; }
         if (event.type === 'medkit-collected'&&localEvent) ui.status.textContent = '+32 HP';
         if (event.type === 'player-died'&&localEvent) ui.status.textContent = networkMode?'RAIDER DOWN':'RAID FAILED — нажми RESTART GAME';
-        if (event.type === 'boss-defeated') ui.status.textContent = 'WARDEN-X DESTROYED — TWO-STAGE RAID COMPLETE';
+        if (event.type === 'boss-defeated') ui.status.textContent = networkMode?'WARDEN-X DESTROYED — CO-OP RAID COMPLETE':'WARDEN-X DESTROYED — TWO-STAGE RAID COMPLETE';
+        if (event.type === 'match-lost'&&networkMode) ui.status.textContent = 'CO-OP RAID FAILED — BOTH RAIDERS DOWN';
       }
     }
     function sync(s) {
