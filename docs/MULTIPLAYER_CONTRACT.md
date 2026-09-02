@@ -80,3 +80,11 @@ Old or retired match frames cannot reactivate a previous match.
 ## Room
 
 Capacity is exactly **2**, with server-owned slots **1** and **2**. Slot assignment is server-owned. Do not casually change capacity from two to four; that requires a dedicated architecture change.
+
+## Reconnectable membership (protocol v2)
+
+Reconnect is an additive, capability-gated protocol-v2 contract; it does not change server authority. A fresh internal WebSocket may opt in with `reconnect=1`. At match start the server privately sends that member a match-scoped `resume-ticket` containing its public logical `connectionId`, `matchId`, a secret 64-character lowercase hexadecimal token, and the fixed 8,000 ms grace duration. The token must never be placed in public/share URLs, rosters, logs, errors, or presentation-oriented connection information.
+
+An unexpected active disconnect reserves the same room slot and keeps the authoritative match ticking while neutral move and fire intents are applied. An unauthenticated `resume=1` transport must first send the exact `resume` envelope. Successful authentication before the deadline preserves `roomId`, `matchId`, `connectionId`, slot, and simulation state, rotates the secret, and sends an immediate non-advancing synchronization frame. Input `seq` is per WebSocket, so the resumed connection resets to `-1` and may begin at zero; the survivor's sequence is unchanged. Expiry aborts with `player-left`. Runtime loss still fails closed because hosts and reservations remain in memory.
+
+The public invite remains `?coop=join&room=<roomId>`; transport flags and credentials do not belong in it.

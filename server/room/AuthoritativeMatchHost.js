@@ -14,6 +14,7 @@ export class AuthoritativeMatchHost {
 
   applyCommand(slot, command) { return this.#simulation.applyCommand(slot, command); }
   initialFrame() { return this.#frame(); }
+  currentFrame() { return createStateFrameMessage(this.#matchId, this.#simulation.getSnapshot(), []); }
   tick() { this.#simulation.step(MULTIPLAYER_TICK_DT); return this.#frame(); }
   getStatus() { return this.#simulation.getSnapshot().status; }
   getMatchId() { return this.#matchId; }

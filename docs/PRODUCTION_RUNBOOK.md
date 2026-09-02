@@ -85,3 +85,7 @@ Record observed results rather than treating this checklist as proof that unperf
 | Static asset deployment fails | Verify the build command generated `dist/`. |
 | An API route returns the SPA page | Verify `/api/*` remains Worker-first. |
 | An unexpected old match appears | Inspect `matchId` lifecycle and stale-match protection. |
+
+## Reconnect transport capability
+
+The room WebSocket route selectively forwards the internal non-secret flags `reconnect=1` (fresh opt-in connection) and `resume=1` (pending authenticated resume), never arbitrary query parameters or resume tokens. Supplying both flags, or malformed values, returns HTTP 400. The normal browser flow does not enable this capability yet, so operators must not claim browser automatic reconnect is available from this server-foundation change alone.

@@ -1,5 +1,6 @@
 export const MULTIPLAYER_PROTOCOL_VERSION = 2;
 export const MAX_MULTIPLAYER_MESSAGE_BYTES = 4096;
+const RESUME_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasExactKeys = (value, keys) => {
@@ -34,6 +35,16 @@ export function validateInputMessage(message) {
   if (!Number.isSafeInteger(message.seq) || message.seq < 0) return { ok: false, code: 'invalid-sequence' };
   if (!validateCommand(message.command)) return { ok: false, code: 'invalid-command' };
   return { ok: true, value: message };
+}
+
+export function validateResumeMessage(message) {
+  if (!isRecord(message)) return { ok: false, code: 'resume-rejected' };
+  const valid = message.version === MULTIPLAYER_PROTOCOL_VERSION
+    && message.type === 'resume'
+    && hasExactKeys(message, ['version', 'type', 'matchId', 'connectionId', 'resumeToken'])
+    && validString(message.matchId) && validString(message.connectionId)
+    && RESUME_TOKEN_PATTERN.test(message.resumeToken);
+  return valid ? { ok: true, value: message } : { ok: false, code: 'resume-rejected' };
 }
 
 export const createWelcomeMessage = (roomId, connectionId, slot, capacity) => ({
@@ -140,6 +151,12 @@ export function validateServerMessage(message) {
       valid = hasExactKeys(message, ['version', 'type', 'matchId', 'seq']) && validString(message.matchId)
         && Number.isSafeInteger(message.seq) && message.seq >= 0;
       break;
+    case 'resume-ticket':
+      valid = hasExactKeys(message, ['version', 'type', 'matchId', 'connectionId', 'resumeToken', 'graceMs'])
+        && validString(message.matchId) && validString(message.connectionId)
+        && RESUME_TOKEN_PATTERN.test(message.resumeToken)
+        && Number.isSafeInteger(message.graceMs) && message.graceMs > 0;
+      break;
     case 'state-frame': {
       const snapshot = message.snapshot;
       valid = hasExactKeys(message, ['version', 'type', 'matchId', 'tick', 'snapshot', 'events'])
@@ -177,6 +194,12 @@ export function createMatchAbortedMessage(matchId, reason) {
   if (typeof matchId !== 'string' || matchId.length === 0) throw new TypeError('matchId is required');
   if (typeof reason !== 'string' || reason.length === 0) throw new TypeError('reason is required');
   return { version: MULTIPLAYER_PROTOCOL_VERSION, type: 'match-aborted', matchId, reason };
+}
+
+export function createResumeTicketMessage(matchId, connectionId, resumeToken, graceMs) {
+  const message = { version: MULTIPLAYER_PROTOCOL_VERSION, type: 'resume-ticket', matchId, connectionId, resumeToken, graceMs };
+  if (!validateServerMessage(message).ok) throw new TypeError('invalid resume ticket');
+  return message;
 }
 
 export const createRosterMessage = (capacity, players) => ({

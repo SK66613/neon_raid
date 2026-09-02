@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'; import test from 'node:test'; import { 
 class Socket { constructor(){this.messages=[];this.attachment=null;this.closed=false;this.readyState=1;this.closeArgs=[];this.throwOnSend=false;} send(v){if(this.throwOnSend)throw new Error('broken send');this.messages.push(JSON.parse(v));} serializeAttachment(v){this.attachment=structuredClone(v);} deserializeAttachment(){return structuredClone(this.attachment);} close(code,reason){this.closed=true;this.readyState=3;this.closeArgs.push([code,reason]);} }
 class Context { constructor(){this.sockets=[];} acceptWebSocket(s){this.sockets.push(s);} getWebSockets(){return [...this.sockets];} remove(s){this.sockets=this.sockets.filter(x=>x!==s);} }
 class FakeResponse { constructor(body,init={}){this.body=body;this.status=init.status??200;this.webSocket=init.webSocket;} static json(v,init){return new FakeResponse(JSON.stringify(v),init);} async json(){return JSON.parse(this.body);} }
-class Scheduler { constructor(){this.callbacks=new Map();this.next=1;this.clears=0;} setInterval(fn,ms){assert.equal(ms,1000/30);const id=this.next++;this.callbacks.set(id,fn);return id;} clearInterval(id){this.clears++;this.callbacks.delete(id);} tick(){for(const fn of [...this.callbacks.values()])fn();} }
+class Scheduler { constructor(){this.callbacks=new Map();this.timeouts=new Map();this.next=1;this.clears=0;} setInterval(fn,ms){assert.equal(ms,1000/30);const id=this.next++;this.callbacks.set(id,fn);return id;} clearInterval(id){this.clears++;this.callbacks.delete(id);} setTimeout(fn,ms){assert.equal(ms,8000);const id=this.next++;this.timeouts.set(id,fn);return id;} clearTimeout(id){this.timeouts.delete(id);} tick(){for(const fn of [...this.callbacks.values()])fn();} expire(){for(const fn of [...this.timeouts.values()])fn();} }
 const last=(s,type)=>s.messages.filter(m=>m.type===type).at(-1); const frames=s=>s.messages.filter(m=>m.type==='state-frame');
 
 test('RaidRoom runs match lifecycle, strict matched sequencing, and fresh replacement', async t=>{
@@ -16,7 +16,7 @@ test('RaidRoom runs match lifecycle, strict matched sequencing, and fresh replac
  assert.equal(one.attachment.matchId,'match-1'); assert.equal(two.attachment.matchId,'match-1'); assert.equal(frames(one)[0].tick,0); assert.deepEqual(frames(one)[0],frames(two)[0]); assert.equal(frames(one)[0].events[0].type,'match-started');
  scheduler.tick(); scheduler.tick(); assert.deepEqual(frames(one).map(f=>f.tick),[0,1,2]); assert.deepEqual(frames(two).map(f=>f.tick),[0,1,2]);
  const before=frames(one).length; room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'wrong',seq:8,command:{type:'dash'}})); assert.equal(last(one,'error').code,'stale-match'); assert.equal(one.attachment.lastInputSeq,-1);
- room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:4,command:{type:'move',x:1,y:0}})); assert.deepEqual(last(one,'input-ack'),{version:2,type:'input-ack',matchId:'match-1',seq:4}); assert.equal(frames(one).length,before); assert.deepEqual(one.attachment,{connectionId:one.attachment.connectionId,slot:1,lastInputSeq:4,matchId:'match-1',matchState:'active'});
+ room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:4,command:{type:'move',x:1,y:0}})); assert.deepEqual(last(one,'input-ack'),{version:2,type:'input-ack',matchId:'match-1',seq:4}); assert.equal(frames(one).length,before); assert.equal(one.attachment.lastInputSeq,4);
  room.webSocketMessage(two,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:2,command:{type:'move',x:-1,y:0}})); assert.equal(last(two,'input-ack').seq,2);
  room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:4,command:{type:'dash'}})); assert.equal(last(one,'error').code,'stale-sequence');
  for(const extra of [{slot:2},{dt:.1}]) room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:5,command:{type:'dash'},...extra})); assert.equal(last(one,'error').code,'invalid-message');
@@ -26,6 +26,41 @@ test('RaidRoom runs match lifecycle, strict matched sequencing, and fresh replac
  await room.fetch(req); const replacement=pairs[2].server; assert.equal(one.attachment.matchId,'match-2'); assert.equal(replacement.attachment.matchId,'match-2'); assert.notEqual(one.attachment.matchId,'match-1');
  room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:5,command:{type:'dash'}})); assert.equal(last(one,'error').code,'stale-match'); assert.equal(one.attachment.lastInputSeq,4);
  room.webSocketMessage(one,JSON.stringify({version:2,type:'input',matchId:'match-2',seq:5,command:{type:'dash'}})); assert.equal(last(one,'input-ack').matchId,'match-2'); room.abortMatch('server-error'); assert.equal(scheduler.callbacks.size,0);
+});
+
+test('reconnect-capable membership reserves, resumes with rotation, and expires safely', async t=>{
+ const oldR=globalThis.Response,oldW=globalThis.WebSocketPair,pairs=[];globalThis.Response=FakeResponse;globalThis.WebSocketPair=class{constructor(){this.client=new Socket();this.server=new Socket();pairs.push(this);}};
+ t.after(()=>{globalThis.Response=oldR;if(oldW===undefined)delete globalThis.WebSocketPair;else globalThis.WebSocketPair=oldW;});
+ const ctx=new Context(),scheduler=new Scheduler();let now=100,id=0,token=0;
+ const room=new RaidRoom(ctx,{scheduler,now:()=>now,createMatchId:()=>`match-${++id}`,createResumeToken:()=>`${++token}`.padStart(64,'0')});
+ const capable=new Request('https://x/ws?roomId=room&reconnect=1',{headers:{Upgrade:'websocket'}}),normal=new Request('https://x/ws?roomId=room',{headers:{Upgrade:'websocket'}});
+ await room.fetch(capable);await room.fetch(normal);const gone=pairs[0].server,survivor=pairs[1].server,host=room.host,oldToken=last(gone,'resume-ticket').resumeToken;
+ room.webSocketMessage(gone,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:7,command:{type:'move',x:1,y:1}}));
+ room.webSocketMessage(survivor,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:9,command:{type:'dash'}}));
+ room.webSocketError(gone);assert.equal(room.host,host);assert.equal(scheduler.callbacks.size,1);assert.equal(scheduler.timeouts.size,1);assert.equal(last(survivor,'match-aborted'),undefined);
+ scheduler.tick();assert.equal(frames(survivor).at(-1).snapshot.players[0].moveX,0);assert.equal(frames(survivor).at(-1).snapshot.players[0].firing,false);
+ assert.equal((await room.fetch(normal)).status,409);
+ await room.fetch(new Request('https://x/ws?roomId=room&resume=1',{headers:{Upgrade:'websocket'}}));const pending=pairs.at(-1).server;
+ assert.equal(last(survivor,'roster').players.length,1);const beforeTick=frames(survivor).at(-1).tick;
+ room.webSocketMessage(pending,JSON.stringify({version:2,type:'input',matchId:'match-1',seq:0,command:{type:'dash'}}));assert.equal(last(pending,'error').code,'resume-rejected');
+ room.webSocketMessage(pending,JSON.stringify({version:2,type:'resume',matchId:'match-1',connectionId:gone.attachment.connectionId,resumeToken:oldToken}));
+ assert.equal(pending.attachment.connectionId,gone.attachment.connectionId);assert.equal(pending.attachment.slot,gone.attachment.slot);assert.equal(pending.attachment.lastInputSeq,-1);assert.equal(room.host,host);assert.equal(last(pending,'welcome').connectionId,gone.attachment.connectionId);assert.notEqual(last(pending,'resume-ticket').resumeToken,oldToken);assert.equal(frames(pending).at(-1).tick,beforeTick);assert.deepEqual(frames(pending).at(-1).events,[]);assert.equal(survivor.attachment.lastInputSeq,9);
+ await room.fetch(new Request('https://x/ws?roomId=room&resume=1',{headers:{Upgrade:'websocket'}}));const replay=pairs.at(-1).server;room.webSocketMessage(replay,JSON.stringify({version:2,type:'resume',matchId:'match-1',connectionId:gone.attachment.connectionId,resumeToken:oldToken}));assert.equal(last(replay,'error').code,'resume-rejected');
+ room.webSocketError(pending);const deadline=room.reservations.get(pending.attachment.connectionId).deadline;room.handleDeparture(pending);assert.equal(room.reservations.get(pending.attachment.connectionId).deadline,deadline);assert.equal(scheduler.timeouts.size,1);
+ now=deadline;scheduler.expire();assert.equal(room.host,null);assert.equal(scheduler.callbacks.size,0);assert.equal(survivor.attachment.matchState,'waiting');assert.equal(last(survivor,'match-aborted').reason,'player-left');assert.equal(room.reservations.size,0);
+ ctx.remove(gone);ctx.remove(pending);ctx.remove(replay);await room.fetch(normal);assert.equal(room.host?.getMatchId(),'match-2');
+});
+
+test('intentional capable close aborts immediately without reservation',async t=>{
+ const oldR=globalThis.Response,oldW=globalThis.WebSocketPair,pairs=[];globalThis.Response=FakeResponse;globalThis.WebSocketPair=class{constructor(){this.client=new Socket();this.server=new Socket();pairs.push(this);}};t.after(()=>{globalThis.Response=oldR;if(oldW===undefined)delete globalThis.WebSocketPair;else globalThis.WebSocketPair=oldW;});
+ const ctx=new Context(),scheduler=new Scheduler(),room=new RaidRoom(ctx,{scheduler,createMatchId:()=> 'm',createResumeToken:()=> 'a'.repeat(64)}),req=new Request('https://x/ws?roomId=room&reconnect=1',{headers:{Upgrade:'websocket'}});await room.fetch(req);await room.fetch(req);room.webSocketClose(pairs[0].server,1000,'Session closed',true);assert.equal(room.host,null);assert.equal(room.reservations.size,0);assert.equal(last(pairs[1].server,'match-aborted').reason,'player-left');
+});
+
+test('terminal frame during grace retires reservations and returns survivor to waiting',async t=>{
+ const oldR=globalThis.Response,oldW=globalThis.WebSocketPair,pairs=[];globalThis.Response=FakeResponse;globalThis.WebSocketPair=class{constructor(){this.client=new Socket();this.server=new Socket();pairs.push(this);}};t.after(()=>{globalThis.Response=oldR;if(oldW===undefined)delete globalThis.WebSocketPair;else globalThis.WebSocketPair=oldW;});
+ let id=0;const frame=status=>({version:2,type:'state-frame',matchId:`m${id}`,tick:1,snapshot:{status},events:[]});
+ const hosts=[];const createHost=matchId=>{const host={getMatchId:()=>matchId,initialFrame:()=>frame('active'),tick:()=>frame('won'),applyCommand(){},currentFrame:()=>frame('active')};hosts.push(host);return host;};
+ const ctx=new Context(),scheduler=new Scheduler(),room=new RaidRoom(ctx,{scheduler,createMatchId:()=>`m${++id}`,createHost,createResumeToken:()=> 'a'.repeat(64)}),capable=new Request('https://x/ws?roomId=room&reconnect=1',{headers:{Upgrade:'websocket'}});await room.fetch(capable);await room.fetch(capable);const absent=pairs[0].server,survivor=pairs[1].server;room.webSocketError(absent);scheduler.tick();assert.equal(frames(survivor).at(-1).snapshot.status,'won');assert.equal(room.reservations.size,0);assert.equal(room.host,null);assert.equal(survivor.attachment.matchState,'waiting');ctx.remove(absent);await room.fetch(capable);assert.equal(room.host,hosts[1]);assert.equal(room.host.getMatchId(),'m2');
 });
 
 test('broadcast skips CLOSING sockets and abort cleanup survives a throwing send', async t=>{
