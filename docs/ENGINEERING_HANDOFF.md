@@ -15,9 +15,11 @@ Current multiplayer scope is the Warden-X boss encounter only. Multiplayer Stage
 | --- | --- |
 | Repository | `SK66613/neon_raid` |
 | Default branch | `main` |
-| Verified current main | `4ca95666fac598c2d4d3b0e76b20f25b3ceb0c75` |
+| Verified implementation baseline | `4ca95666fac598c2d4d3b0e76b20f25b3ceb0c75` |
 | Status date | 2026-09-02 |
 | Production | <https://neon-raid.cyberian13.workers.dev/> |
+
+The baseline SHA identifies the code and production implementation state audited for this handoff. It is not a promise that `main` remains at that commit: documentation-only and later feature merges may advance the branch. Check the actual GitHub `main` ref whenever an exact current SHA matters.
 
 **FIRST ONLINE PLAYABLE has been reached.** On 2026-09-02, production was manually exercised with a desktop browser and a phone browser. Device A created a room and received a shareable URL; Device B joined that same URL. The authoritative room started after both connected, the Warden-X scene contained two Raiders and one shared boss, and both players could move and shoot.
 
