@@ -22,17 +22,27 @@ export class RaidRoom {
     this.failClosedStaleAttachments();
   }
 
-  failClosedStaleAttachments() {
-    const stale = this.ctx.getWebSockets().filter(socket => socket.deserializeAttachment()?.matchState === 'active');
-    const matchIds = [...new Set(stale.map(socket => socket.deserializeAttachment()?.matchId).filter(Boolean))];
-    for (const matchId of matchIds) {
-      const encoded = json(createMatchAbortedMessage(matchId, 'server-error'));
-      for (const socket of stale) if (socket.deserializeAttachment()?.matchId === matchId) socket.send(encoded);
-    }
-    for (const socket of stale) this.updateAttachment(socket, { matchId: null, matchState: 'waiting' });
+  openSockets(excludedSocket = null) {
+    return this.ctx.getWebSockets().filter(socket => socket !== excludedSocket && isOpenSocket(socket));
   }
 
-  coordinator() { return new RoomCoordinator(this.ctx.getWebSockets().map(socket => socket.deserializeAttachment()).filter(Boolean)); }
+  safeSend(socket, message) {
+    if (!isOpenSocket(socket)) return false;
+    try { socket.send(typeof message === 'string' ? message : json(message)); return true; } catch { return false; }
+  }
+
+  failClosedStaleAttachments() {
+    const stale = this.ctx.getWebSockets().filter(socket => socket.deserializeAttachment()?.matchState === 'active');
+    const staleMetadata = stale.map(socket => ({ socket, attachment: socket.deserializeAttachment() }));
+    const matchIds = [...new Set(staleMetadata.map(({ attachment }) => attachment?.matchId).filter(Boolean))];
+    for (const { socket } of staleMetadata) this.updateAttachment(socket, { matchId: null, matchState: 'waiting' });
+    for (const matchId of matchIds) {
+      const encoded = json(createMatchAbortedMessage(matchId, 'server-error'));
+      for (const { socket, attachment } of staleMetadata) if (attachment?.matchId === matchId) this.safeSend(socket, encoded);
+    }
+  }
+
+  coordinator() { return new RoomCoordinator(this.openSockets().map(socket => socket.deserializeAttachment()).filter(Boolean)); }
 
   async fetch(request) {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('WebSocket upgrade required', { status: 426 });
@@ -46,14 +56,15 @@ export class RaidRoom {
     const roomId = new URL(request.url).searchParams.get('roomId');
     server.send(json(createWelcomeMessage(roomId, connectionId, joined.member.slot, ROOM_CAPACITY)));
     this.broadcastRoster();
-    if (this.ctx.getWebSockets().length === ROOM_CAPACITY && !this.host) this.startMatch();
+    if (this.openSockets().length === ROOM_CAPACITY && !this.host) this.startMatch();
     return new Response(null, { status: 101, webSocket: client });
   }
 
   startMatch() {
-    if (this.host || this.timer || this.ctx.getWebSockets().length !== ROOM_CAPACITY) return;
+    const participants = this.openSockets();
+    if (this.host || this.timer || participants.length !== ROOM_CAPACITY) return;
     const matchId = this.createMatchId(); this.host = this.createHost(matchId);
-    for (const socket of this.ctx.getWebSockets()) this.updateAttachment(socket, { matchId, matchState: 'active' });
+    for (const socket of participants) this.updateAttachment(socket, { matchId, matchState: 'active' });
     this.broadcast(this.host.initialFrame());
     this.timer = this.scheduler.setInterval(() => this.runAuthoritativeTick(), MULTIPLAYER_TICK_DT * 1000);
   }
@@ -111,15 +122,12 @@ export class RaidRoom {
   sendError(socket, code, message) { socket.send(json(createErrorMessage(code, message))); }
   broadcast(message, excludedSocket = null) {
     const encoded = json(message);
-    for (const socket of this.ctx.getWebSockets()) {
-      if (socket === excludedSocket || !isOpenSocket(socket)) continue;
-      try { socket.send(encoded); } catch {}
-    }
+    for (const socket of this.openSockets(excludedSocket)) this.safeSend(socket, encoded);
   }
   broadcastRoster(excludedSocket = null) {
-    const sockets = this.ctx.getWebSockets().filter(socket => socket !== excludedSocket && isOpenSocket(socket));
+    const sockets = this.openSockets(excludedSocket);
     const coordinator = new RoomCoordinator(sockets.map(socket => socket.deserializeAttachment()).filter(Boolean));
     const message = json(createRosterMessage(ROOM_CAPACITY, coordinator.roster()));
-    for (const socket of sockets) try { socket.send(message); } catch {}
+    for (const socket of sockets) this.safeSend(socket, message);
   }
 }

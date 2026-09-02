@@ -44,3 +44,18 @@ test('webSocketError closes and excludes the failed socket while the survivor wa
  const ctx=new Context(),scheduler=new Scheduler(),room=new RaidRoom(ctx,{scheduler,createMatchId:()=> 'error-match'}),req=new Request('https://x/ws?roomId=room',{headers:{Upgrade:'websocket'}});await room.fetch(req);await room.fetch(req);const survivor=pairs[0].server,failed=pairs[1].server,failedCount=failed.messages.length;
  room.webSocketError(failed);assert.deepEqual(failed.closeArgs.at(-1),[1011,'WebSocket error']);assert.equal(failed.messages.length,failedCount);assert.equal(last(survivor,'match-aborted').reason,'player-left');assert.equal(survivor.attachment.matchState,'waiting');assert.equal(scheduler.callbacks.size,0);
 });
+
+test('CLOSING membership neither consumes capacity nor starts a match before replacement',async t=>{
+ const oldR=globalThis.Response,oldW=globalThis.WebSocketPair,pairs=[];globalThis.Response=FakeResponse;globalThis.WebSocketPair=class{constructor(){this.client=new Socket();this.server=new Socket();pairs.push(this);}};
+ t.after(()=>{globalThis.Response=oldR;if(oldW===undefined)delete globalThis.WebSocketPair;else globalThis.WebSocketPair=oldW;});
+ const open=new Socket(),closing=new Socket();open.serializeAttachment({connectionId:'open',slot:1,lastInputSeq:-1,matchId:null,matchState:'waiting'});closing.serializeAttachment({connectionId:'closing',slot:2,lastInputSeq:-1,matchId:null,matchState:'waiting'});closing.readyState=2;
+ const ctx=new Context();ctx.sockets=[open,closing];const scheduler=new Scheduler(),room=new RaidRoom(ctx,{scheduler,createMatchId:()=> 'replacement-match'});
+ assert.deepEqual(room.coordinator().roster(),[{connectionId:'open',slot:1}]);assert.equal(room.host,null);assert.equal(scheduler.callbacks.size,0);assert.equal(open.attachment.matchState,'waiting');
+ const response=await room.fetch(new Request('https://x/ws?roomId=room',{headers:{Upgrade:'websocket'}})),replacement=pairs[0].server;
+ assert.equal(response.status,101);assert.equal(scheduler.callbacks.size,1);assert.notEqual(room.host,null);assert.equal(open.attachment.matchState,'active');assert.equal(replacement.attachment.matchState,'active');assert.equal(closing.attachment.matchState,'waiting');assert.equal(frames(closing).length,0);
+});
+
+test('stale recovery clears active metadata even when sends throw or sockets are CLOSING',()=>{
+ const healthy=new Socket(),closing=new Socket();healthy.serializeAttachment({connectionId:'healthy',slot:1,lastInputSeq:3,matchId:'old-match',matchState:'active'});closing.serializeAttachment({connectionId:'closing',slot:2,lastInputSeq:4,matchId:'old-match',matchState:'active'});healthy.throwOnSend=true;closing.readyState=2;
+ const ctx=new Context();ctx.sockets=[healthy,closing];const scheduler=new Scheduler();assert.doesNotThrow(()=>new RaidRoom(ctx,{scheduler}));assert.equal(healthy.attachment.matchState,'waiting');assert.equal(healthy.attachment.matchId,null);assert.equal(closing.attachment.matchState,'waiting');assert.equal(closing.attachment.matchId,null);assert.equal(scheduler.callbacks.size,0);
+});
