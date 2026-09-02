@@ -109,10 +109,14 @@ The merge history records these architectural milestones:
 
 These are deferred scope, not necessarily defects:
 
-- No reconnect/rejoin or disconnect grace.
+- No browser automatic reconnect/rejoin orchestration yet; server grace is capability-gated.
 - No persistent player identity.
 - The active match remains in memory, with no active-match restore after Durable Object/runtime loss.
 - No Telegram authentication or Telegram `startapp` invite flow.
 - No multiplayer Stage 1.
 - Room capacity is exactly 2; there is no four-player generalization.
 - No full progression, loot, token, or NFT system.
+
+## Server reconnect foundation (2026-09-02)
+
+`RaidRoom` now supports opt-in, authenticated, eight-second reconnectable membership for active matches. Membership reservations and the authoritative host are intentionally in memory only, so Durable Object runtime loss continues to fail closed rather than fabricate recovered simulation state. The current browser `NetworkGameSession` does **not** opt in, retain tickets, or automatically reconnect in this PR; ordinary production browser disconnect behavior remains unchanged until the follow-up browser work.

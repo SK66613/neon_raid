@@ -50,6 +50,20 @@ test('join restores an issued ID and forwards its canonical value to the matchin
   assert.deepEqual(calls.get, [issuedId]);
   assert.equal(calls.forwarded.length, 1);
   assert.equal(new URL(calls.forwarded[0].url).searchParams.get('roomId'), ISSUED_ROOM_ID);
+  assert.deepEqual([...new URL(calls.forwarded[0].url).searchParams.keys()], ['roomId']);
+});
+
+test('only exact reconnect transport flags are forwarded and conflicting flags fail closed', async () => {
+  for (const flag of ['reconnect', 'resume']) {
+    const { env, calls } = createEnvironment();
+    await worker.fetch(new Request(`https://example.test/api/rooms/${ISSUED_ROOM_ID}/ws?${flag}=1&resumeToken=secret&other=x`), env);
+    assert.equal(new URL(calls.forwarded[0].url).search, `?roomId=${ISSUED_ROOM_ID}&${flag}=1`);
+  }
+  for (const query of ['reconnect=1&resume=1', 'reconnect=true', 'resume=0']) {
+    const { env, calls } = createEnvironment();
+    const response = await worker.fetch(new Request(`https://example.test/api/rooms/${ISSUED_ROOM_ID}/ws?${query}`), env);
+    assert.equal(response.status, 400); assert.equal(calls.forwarded.length, 0);
+  }
 });
 
 test('old, malformed, unissued, and malformed-encoded room IDs return 400', async () => {

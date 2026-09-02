@@ -16,6 +16,11 @@ export default {
     }
     const match = url.pathname.match(/^\/api\/rooms\/([^/]+)\/ws$/);
     if (request.method === 'GET' && match) {
+      const reconnect = url.searchParams.get('reconnect');
+      const resume = url.searchParams.get('resume');
+      if ((reconnect !== null && reconnect !== '1') || (resume !== null && resume !== '1') || (reconnect === '1' && resume === '1')) {
+        return Response.json({ error: 'invalid-websocket-capability' }, { status: 400 });
+      }
       let candidate;
       try {
         candidate = decodeURIComponent(match[1]);
@@ -35,6 +40,8 @@ export default {
       durableUrl.pathname = '/ws';
       durableUrl.search = '';
       durableUrl.searchParams.set('roomId', roomId);
+      if (reconnect === '1') durableUrl.searchParams.set('reconnect', '1');
+      if (resume === '1') durableUrl.searchParams.set('resume', '1');
       return stub.fetch(new Request(durableUrl, request));
     }
     return Response.json({ error: 'not-found' }, { status: 404 });

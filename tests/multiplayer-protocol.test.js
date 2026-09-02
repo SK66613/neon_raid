@@ -5,11 +5,13 @@ import {
   createErrorMessage,
   createInputAckMessage,
   createMatchAbortedMessage,
+  createResumeTicketMessage,
   createStateFrameMessage,
   createRosterMessage,
   createWelcomeMessage,
   validateCommand,
   validateInputMessage,
+  validateResumeMessage,
   validateServerMessage,
 } from '../src/game/network/protocol.js';
 import { createMultiplayerBossState } from '../src/game/multiplayer/createMultiplayerBossState.js';
@@ -25,6 +27,20 @@ test('protocol version two is supported and version one is rejected', () => {
   assert.deepEqual(validateInputMessage(input({ type: 'dash' }, { version: 1 })), {
     ok: false, code: 'unsupported-version',
   });
+});
+
+test('strict protocol-v2 resume envelopes and tickets validate without extra state', () => {
+  const resumeToken = 'a'.repeat(64);
+  const resume = { version: 2, type: 'resume', matchId: 'match', connectionId: 'connection', resumeToken };
+  assert.equal(validateResumeMessage(resume).ok, true);
+  for (const malformed of [{ ...resume, extra: true }, { ...resume, version: 3 }, { ...resume, matchId: '' },
+    { ...resume, resumeToken: 'A'.repeat(64) }, { ...resume, resumeToken: 'a'.repeat(63) }]) {
+    assert.deepEqual(validateResumeMessage(malformed), { ok: false, code: 'resume-rejected' });
+  }
+  const ticket = createResumeTicketMessage('match', 'connection', resumeToken, 8000);
+  assert.equal(validateServerMessage(ticket).ok, true);
+  assert.deepEqual(Object.keys(ticket).sort(), ['connectionId', 'graceMs', 'matchId', 'resumeToken', 'type', 'version']);
+  assert.equal(validateServerMessage({ ...ticket, snapshot: {} }).ok, false);
 });
 
 test('only exact move, fire, dash, and grenade intent shapes validate', () => {
