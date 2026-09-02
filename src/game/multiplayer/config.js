@@ -2,6 +2,7 @@ export const MULTIPLAYER_TICK_HZ = 30;
 export const MULTIPLAYER_TICK_DT = 1 / MULTIPLAYER_TICK_HZ;
 
 export const ARENA = Object.freeze({ minX: 13, maxX: 347, minY: 60, maxY: 520 });
+export const DASH_DESTINATION_BOUNDS = Object.freeze({ minX: 18, maxX: 342, minY: 70, maxY: 508 });
 
 export const PLAYER_CONFIG = Object.freeze({
   radius: 11, hp: 100, armor: 60, speed: 125,
