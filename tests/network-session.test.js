@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createNetworkGameSession } from '../src/game/session/NetworkGameSession.js';
 import { SessionStatus } from '../src/game/session/GameSession.js';
 import { createMultiplayerBossState } from '../src/game/multiplayer/createMultiplayerBossState.js';
+import { PLAYER_CONFIG } from '../src/game/multiplayer/config.js';
 
 const roomId = 'a'.repeat(64);
 const snapshot = (tick, status = 'active') => ({ ...createMultiplayerBossState(), tick, status });
@@ -170,4 +171,103 @@ test('unsupported protocol and unexpected close fail without reconnect', async (
 test('explicit close clears and closes normally', async () => {
   const { session, socket } = await setup(); session.close(); assert.equal(session.getStatus(), SessionStatus.CLOSED);
   assert.deepEqual(socket.closeArgs, [1000, 'Session closed']); session.close();
+});
+
+test('authoritative snapshot is immutable while local render movement predicts safely', async () => {
+  const { session, socket } = await setup(); socket.emit('message', frame('m1', 0));
+  const before = session.getSnapshot(), localBefore = before.players.find(player => player.slot === 2);
+  session.submit({ type: 'move', x: 1, y: 0 }); session.update(999);
+  assert.deepEqual(session.getSnapshot(), before);
+  assert.ok(session.getRenderSnapshot().players.find(player => player.slot === 2).x > localBefore.x);
+});
+
+test('prediction never changes resources or synthesizes gameplay entities', async () => {
+  const { session, socket } = await setup(); const initial = snapshot(0);
+  initial.players[1].hp = 73; initial.players[1].armor = 22; initial.players[1].ammo = 7;
+  initial.players[1].reserveAmmo = 19; initial.players[1].grenades = 1; initial.boss.hp = 777;
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 0, snapshot: initial, events: [] }));
+  for (const command of [{ type: 'move', x: 1, y: 0 }, { type: 'dash' },
+    { type: 'fire', active: true }, { type: 'grenade' }]) session.submit(command);
+  session.update(0.02); const render = session.getRenderSnapshot(), local = render.players[1];
+  assert.deepEqual([local.hp, local.armor, local.ammo, local.reserveAmmo, local.grenades, render.boss.hp], [73, 22, 7, 19, 1, 777]);
+  assert.deepEqual(render.bullets, []); assert.deepEqual(render.enemyBullets, []);
+});
+
+test('remote Raider, boss, and stable projectiles interpolate without authority changes or extrapolation', async () => {
+  const { session, socket } = await setup(); const first = snapshot(0), second = snapshot(1);
+  first.players[0].x = 100; second.players[0].x = 130; first.boss.x = 160; second.boss.x = 190;
+  first.boss.hp = 900; second.boss.hp = 800; second.boss.phase = 2;
+  first.bullets = [{ id: 'bullet-9', ownerSlot: 1, x: 10, y: 20, vx: 30, vy: 0, life: 1, damage: 17 }];
+  second.bullets = [{ ...first.bullets[0], x: 20 }];
+  first.enemyBullets = [{ id: 'enemy-bullet-8', x: 50, y: 60, vx: 0, vy: 30, life: 1, radius: 4, damage: 9 }];
+  second.enemyBullets = [{ ...first.enemyBullets[0], y: 70 }];
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 0, snapshot: first, events: [] }));
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 1, snapshot: second, events: [] }));
+  session.update(1 / 60); let render = session.getRenderSnapshot();
+  assert.equal(render.players[0].x, 115); assert.equal(render.boss.x, 175);
+  assert.deepEqual([render.boss.hp, render.boss.phase], [800, 2]);
+  assert.equal(render.bullets[0].x, 15); assert.equal(render.enemyBullets[0].y, 65);
+  session.update(10); render = session.getRenderSnapshot();
+  assert.equal(render.players[0].x, 130); assert.equal(render.boss.x, 190);
+  assert.equal(render.bullets[0].x, 20); assert.equal(render.enemyBullets[0].y, 70);
+});
+
+test('local player is predicted rather than remote-interpolated and render copies are owned', async () => {
+  const { session, socket } = await setup(); const first = snapshot(0), second = snapshot(1);
+  first.players[1].x = 200; second.players[1].x = 210;
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 0, snapshot: first, events: [] }));
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 1, snapshot: second, events: [] }));
+  assert.equal(session.getRenderSnapshot().players[1].x, 200); // soft reconciliation preserves the prior visible position, not remote alpha.
+  const render = session.getRenderSnapshot(); render.players[1].x = 999; render.boss.hp = 0;
+  assert.notEqual(session.getRenderSnapshot().players[1].x, 999); assert.equal(session.getSnapshot().boss.hp, 1200);
+});
+
+test('small reconciliation converges smoothly while large divergence hard snaps', async () => {
+  const { session, socket } = await setup(); socket.emit('message', frame('m1', 0));
+  const small = snapshot(1); small.players[1].x += 10;
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 1, snapshot: small, events: [] }));
+  assert.equal(session.getRenderSnapshot().players[1].x, 215);
+  session.update(0.1); assert.ok(session.getRenderSnapshot().players[1].x > 215);
+  const large = snapshot(2); large.players[1].x = 320;
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 2, snapshot: large, events: [] }));
+  assert.equal(session.getRenderSnapshot().players[1].x, 320);
+});
+
+test('frame ACK boundary retains an unreflected dash and retires a reflected dash', async () => {
+  const { session, socket } = await setup(); socket.emit('message', frame('m1', 0));
+  session.submit({ type: 'move', x: 1, y: 0 }); session.submit({ type: 'dash' }); session.update(0);
+  const unreflected = snapshot(1);
+  socket.emit('message', message('input-ack', { matchId: 'm1', seq: 0 }));
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 1, snapshot: unreflected, events: [] }));
+  assert.equal(session.getRenderSnapshot().players[1].x, 277);
+  const reflected = snapshot(2); reflected.players[1].x = 277;
+  socket.emit('message', message('input-ack', { matchId: 'm1', seq: 1 }));
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 2, snapshot: reflected, events: [] }));
+  assert.equal(session.getRenderSnapshot().players[1].x, 277);
+});
+
+test('a reflected but rejected full-distance dash hard-snaps to server truth', async () => {
+  const { session, socket } = await setup(); const authoritative = snapshot(0);
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 0, snapshot: authoritative, events: [] }));
+  const startY = authoritative.players[1].y;
+  session.submit({ type: 'dash' }); session.update(0);
+  assert.equal(session.getRenderSnapshot().players[1].y, startY - PLAYER_CONFIG.dashDistance);
+
+  socket.emit('message', message('input-ack', { matchId: 'm1', seq: 0 }));
+  const rejected = snapshot(1); rejected.players[1].y = startY;
+  socket.emit('message', message('state-frame', { matchId: 'm1', tick: 1, snapshot: rejected, events: [] }));
+  assert.equal(session.getRenderSnapshot().players[1].y, startY);
+});
+
+test('death, abort, and replacement match clear old presentation state', async () => {
+  const { session, socket } = await setup(); socket.emit('message', frame('old', 0));
+  session.submit({ type: 'move', x: 1, y: 0 }); session.update(0.05);
+  const dead = snapshot(1); dead.players[1].alive = false;
+  socket.emit('message', message('state-frame', { matchId: 'old', tick: 1, snapshot: dead, events: [] }));
+  session.update(0.1); assert.equal(session.getRenderSnapshot().players[1].x, dead.players[1].x);
+  socket.emit('message', message('match-aborted', { matchId: 'old', reason: 'player-left' }));
+  assert.equal(session.getRenderSnapshot(), null);
+  const fresh = snapshot(0); fresh.players[1].x = 100;
+  socket.emit('message', message('state-frame', { matchId: 'fresh', tick: 0, snapshot: fresh, events: [] }));
+  assert.equal(session.getRenderSnapshot().players[1].x, 100);
 });

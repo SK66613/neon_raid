@@ -39,6 +39,7 @@ jobs:
           node --check src/game/presentation/networkView.js
           node --check src/game/network/protocol.js
           node --check src/game/multiplayer/config.js
+          node --check src/game/multiplayer/playerKinematics.js
           node --check src/game/multiplayer/createMultiplayerBossState.js
           node --check src/game/multiplayer/MultiplayerBossSimulation.js
           node --check server/room/RoomCoordinator.js
@@ -53,6 +54,7 @@ jobs:
           node --check tests/raid-room.test.js
           node --check tests/authoritative-match-host.test.js
           node --check tests/multiplayer-simulation.test.js
+          node --check tests/player-kinematics.test.js
           node --check tests/network-session.test.js
           node --check tests/network-view.test.js
           node --check scripts/verify-assets.mjs
@@ -66,6 +68,8 @@ jobs:
         run: npm run test:room
       - name: Test authoritative multiplayer boss simulation
         run: npm run test:multiplayer-simulation
+      - name: Test shared player kinematics
+        run: npm run test:player-kinematics
       - name: Test authoritative room host and integration
         run: npm run test:authoritative-room
       - name: Test authoritative browser network session

@@ -1,10 +1,10 @@
 import { validateCommand } from '../network/protocol.js';
 import { createMathRandomRng } from '../simulation/rng.js';
-import { ARENA, DANGER_CONFIG, MULTIPLAYER_TICK_DT, PLAYER_CONFIG } from './config.js';
+import { DANGER_CONFIG, MULTIPLAYER_TICK_DT, PLAYER_CONFIG } from './config.js';
 import { createMultiplayerBossState } from './createMultiplayerBossState.js';
+import { calculateDash, integratePlayerMovement, movementDirection } from './playerKinematics.js';
 
 const W = 360, H = 540;
-const DIRECTIONS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 const clone = value => structuredClone(value);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -130,21 +130,8 @@ export class MultiplayerBossSimulation {
       player.firing = false; player.moveX = 0; player.moveY = 0; player.pendingActions = [];
     }
   }
-  #blocked(player, x, y) {
-    return x - player.radius < ARENA.minX || x + player.radius > ARENA.maxX
-      || y - player.radius < ARENA.minY || y + player.radius > ARENA.maxY;
-  }
-  #move(player, dx, dy) {
-    const oldX = player.x, oldY = player.y;
-    player.x += dx;
-    if (this.#blocked(player, player.x, player.y)) player.x = oldX;
-    player.y += dy;
-    if (this.#blocked(player, player.x, player.y)) player.y = oldY;
-  }
   #direction(player, dx, dy) {
-    if (Math.hypot(dx, dy) < 0.001) return player.lastDirection;
-    const index = Math.round((Math.atan2(dy, dx) + Math.PI / 2) / (Math.PI / 4));
-    return DIRECTIONS[((index % 8) + 8) % 8];
+    return movementDirection(dx, dy, player.lastDirection);
   }
 
   #playerStep(player, dt) {
@@ -161,19 +148,7 @@ export class MultiplayerBossSimulation {
       if (this.#state.status !== 'active') return;
     }
     if (player.firing) this.#fire(player);
-    let dx = player.moveX, dy = player.moveY;
-    if (dx || dy) {
-      const length = Math.hypot(dx, dy); dx /= length; dy /= length;
-      player.lastDirection = this.#direction(player, dx, dy);
-      player.vx += dx * PLAYER_CONFIG.acceleration * dt;
-      player.vy += dy * PLAYER_CONFIG.acceleration * dt;
-    }
-    player.vx *= Math.max(0, 1 - PLAYER_CONFIG.friction * dt);
-    player.vy *= Math.max(0, 1 - PLAYER_CONFIG.friction * dt);
-    const speed = Math.hypot(player.vx, player.vy);
-    const maximum = player.speed * (player.dashTimer > 0 ? 1.6 : 1);
-    if (speed > maximum) { player.vx = player.vx / speed * maximum; player.vy = player.vy / speed * maximum; }
-    this.#move(player, player.vx * dt, player.vy * dt);
+    Object.assign(player, integratePlayerMovement(player, dt));
   }
 
   #fire(player) {
@@ -203,12 +178,8 @@ export class MultiplayerBossSimulation {
   }
   #dash(player) {
     if (player.dashCooldown > 0) return;
-    let dx = player.moveX, dy = player.moveY;
-    if (!dx && !dy) { const angle = -Math.PI / 2 + DIRECTIONS.indexOf(player.lastDirection) * Math.PI / 4; dx = Math.cos(angle); dy = Math.sin(angle); }
-    const length = Math.hypot(dx, dy) || 1;
-    const nextX = clamp(player.x + dx / length * PLAYER_CONFIG.dashDistance, 18, 342);
-    const nextY = clamp(player.y + dy / length * PLAYER_CONFIG.dashDistance, 70, 508);
-    if (!this.#blocked(player, nextX, nextY)) { player.x = nextX; player.y = nextY; }
+    const destination = calculateDash(player);
+    player.x = destination.x; player.y = destination.y;
     player.dashTimer = PLAYER_CONFIG.dashDuration; player.dashCooldown = PLAYER_CONFIG.dashCooldown;
     this.#emit('dash', { slot: player.slot, x: player.x, y: player.y });
   }
