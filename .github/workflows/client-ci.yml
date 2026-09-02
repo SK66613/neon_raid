@@ -43,6 +43,8 @@ jobs:
           node --check tests/session.test.js
           node --check tests/room.test.js
           node --check tests/multiplayer-protocol.test.js
+          node --check tests/worker.test.js
+          node --check tests/raid-room.test.js
           node --check scripts/verify-assets.mjs
           node --check scripts/verify-build.mjs
           node --check tests/smoke.spec.js

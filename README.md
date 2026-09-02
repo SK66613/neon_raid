@@ -44,7 +44,7 @@ The protocol's `FRAME` message and its `dt` are local simulation-host controls o
 
 ### Authoritative room foundation
 
-The Cloudflare Worker exposes `POST /api/rooms` and `GET /api/rooms/:roomId/ws`. Each server-generated room ID maps consistently to one `RaidRoom` Durable Object through the `RAID_ROOMS` binding. A room accepts at most two anonymous connections, assigns reusable slots and temporary connection IDs on the server, ingests only validated and sequenced player-intent commands, and broadcasts a stable roster.
+The Cloudflare Worker exposes `POST /api/rooms` and `GET /api/rooms/:roomId/ws`. Each room ID is an opaque, server-issued Durable Object unique ID: creation uses `RAID_ROOMS.newUniqueId()`, while joins validate the capability with `idFromString()` before resolving the matching `RaidRoom`. No room registry, D1, or KV is needed. A room accepts at most two anonymous connections, assigns reusable slots and temporary connection IDs on the server, ingests only validated and sequenced player-intent commands, and broadcasts a stable roster.
 
 The multiplayer protocol is distinct from the local `FRAME` protocol. It accepts only `move`, `fire`, `dash`, and `grenade`; it never accepts browser `dt`, positions, HP, or damage results. The server will own gameplay time when authoritative simulation is introduced. Durable Object WebSocket attachments hold each connection's ID, slot, and last accepted sequence, allowing the room to rebuild its roster with `ctx.getWebSockets()` after hibernation without an always-awake timer.
 

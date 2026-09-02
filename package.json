@@ -12,12 +12,13 @@
     "test:smoke": "playwright test",
     "test:simulation": "node --test tests/simulation.test.js",
     "test:session": "node --test tests/session.test.js",
-    "test:room": "node --test tests/room.test.js tests/multiplayer-protocol.test.js",
-    "dev:server": "npx --yes wrangler@4.33.1 dev",
-    "build:server": "npx --yes wrangler@4.33.1 deploy --dry-run --outdir dist-worker"
+    "test:room": "node --test tests/room.test.js tests/multiplayer-protocol.test.js tests/worker.test.js tests/raid-room.test.js",
+    "dev:server": "wrangler dev",
+    "build:server": "wrangler deploy --dry-run --outdir dist-worker"
   },
   "devDependencies": {
     "vite": "7.1.3",
-    "@playwright/test": "1.55.0"
+    "@playwright/test": "1.55.0",
+    "wrangler": "4.33.1"
   }
 }

@@ -1,7 +1,9 @@
 import { RaidRoom } from './RaidRoom.js';
 import { ROOM_CAPACITY } from './room/RoomCoordinator.js';
 
-const ROOM_ID_PATTERN = /^[0-9a-f]{32}$/;
+const ROOM_ID_PATTERN = /^[0-9a-f]{64}$/;
+
+const invalidRoomId = () => Response.json({ error: 'invalid-room-id' }, { status: 400 });
 
 export { RaidRoom };
 
@@ -9,14 +11,26 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'POST' && url.pathname === '/api/rooms') {
-      const roomId = crypto.randomUUID().replaceAll('-', '');
+      const roomId = env.RAID_ROOMS.newUniqueId().toString();
       return Response.json({ roomId, capacity: ROOM_CAPACITY }, { status: 201 });
     }
     const match = url.pathname.match(/^\/api\/rooms\/([^/]+)\/ws$/);
     if (request.method === 'GET' && match) {
-      const roomId = decodeURIComponent(match[1]);
-      if (!ROOM_ID_PATTERN.test(roomId)) return Response.json({ error: 'invalid-room-id' }, { status: 400 });
-      const stub = env.RAID_ROOMS.get(env.RAID_ROOMS.idFromName(roomId));
+      let candidate;
+      try {
+        candidate = decodeURIComponent(match[1]);
+      } catch {
+        return invalidRoomId();
+      }
+      if (!ROOM_ID_PATTERN.test(candidate)) return invalidRoomId();
+      let id;
+      try {
+        id = env.RAID_ROOMS.idFromString(candidate);
+      } catch {
+        return invalidRoomId();
+      }
+      const roomId = id.toString();
+      const stub = env.RAID_ROOMS.get(id);
       const durableUrl = new URL(request.url);
       durableUrl.pathname = '/ws';
       durableUrl.search = '';

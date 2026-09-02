@@ -6,8 +6,12 @@ export class RoomCoordinator {
     for (const member of members) this.restore(member);
   }
 
-  restore({ connectionId, slot, lastInputSeq = -1 }) {
-    if (typeof connectionId !== 'string' || !Number.isInteger(slot) || slot < 1 || slot > ROOM_CAPACITY) return false;
+  restore(metadata) {
+    if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
+    const { connectionId, slot, lastInputSeq } = metadata;
+    if (typeof connectionId !== 'string' || connectionId.length === 0 || this.members.has(connectionId)) return false;
+    if (!Number.isInteger(slot) || slot < 1 || slot > ROOM_CAPACITY) return false;
+    if (!Number.isSafeInteger(lastInputSeq) || lastInputSeq < -1) return false;
     if ([...this.members.values()].some((member) => member.slot === slot)) return false;
     this.members.set(connectionId, { connectionId, slot, lastInputSeq });
     return true;

@@ -35,6 +35,21 @@ test('fresh input sequences advance and duplicate or stale sequences do not', ()
   assert.deepEqual(room.acceptInput('missing', 0), { ok: false, reason: 'not-member' });
 });
 
+test('attachment restore fails closed on malformed or duplicate metadata', () => {
+  const room = new RoomCoordinator();
+  assert.equal(room.restore(null), false);
+  assert.equal(room.restore([]), false);
+  assert.equal(room.restore({ connectionId: 'alpha', slot: 1 }), false);
+  assert.equal(room.restore({ connectionId: '', slot: 1, lastInputSeq: -1 }), false);
+  assert.equal(room.restore({ connectionId: 'alpha', slot: 0, lastInputSeq: -1 }), false);
+  assert.equal(room.restore({ connectionId: 'alpha', slot: 1, lastInputSeq: -2 }), false);
+  assert.equal(room.restore({ connectionId: 'alpha', slot: 1, lastInputSeq: 1.5 }), false);
+  assert.equal(room.restore({ connectionId: 'alpha', slot: 1, lastInputSeq: 7 }), true);
+  assert.equal(room.restore({ connectionId: 'alpha', slot: 2, lastInputSeq: 8 }), false);
+  assert.equal(room.restore({ connectionId: 'beta', slot: 1, lastInputSeq: 8 }), false);
+  assert.deepEqual(room.roster(), [{ connectionId: 'alpha', slot: 1 }]);
+});
+
 test('wire commands cannot inject authoritative state or global controls', () => {
   for (const command of [
     { type: 'move', x: 0, y: 1, hp: 100 },
