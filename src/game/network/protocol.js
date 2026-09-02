@@ -57,6 +57,63 @@ const jsonCopy = (value, label) => {
   return copy;
 };
 
+const validString = value => typeof value === 'string' && value.length > 0;
+const validSlot = value => value === 1 || value === 2;
+const validCapacity = value => value === 2;
+const validPlayer = player => isRecord(player) && validSlot(player.slot)
+  && ['x', 'y', 'radius', 'vx', 'vy', 'hp', 'armor', 'ammo', 'reserveAmmo', 'grenades',
+    'dashCooldown', 'hitTimer', 'dashTimer'].every(key => typeof player[key] === 'number' && Number.isFinite(player[key]))
+  && typeof player.alive === 'boolean' && typeof player.firing === 'boolean'
+  && validString(player.lastDirection) && validString(player.aimDirection);
+
+export function validateServerMessage(message) {
+  if (!isRecord(message)) return { ok: false, code: 'invalid-message' };
+  if (message.version !== MULTIPLAYER_PROTOCOL_VERSION) return { ok: false, code: 'unsupported-version' };
+  let valid = false;
+  switch (message.type) {
+    case 'welcome':
+      valid = hasExactKeys(message, ['version', 'type', 'roomId', 'connectionId', 'slot', 'capacity'])
+        && /^[0-9a-f]{64}$/.test(message.roomId) && validString(message.connectionId)
+        && validSlot(message.slot) && validCapacity(message.capacity);
+      break;
+    case 'roster':
+      valid = hasExactKeys(message, ['version', 'type', 'capacity', 'players'])
+        && validCapacity(message.capacity) && Array.isArray(message.players)
+        && message.players.length <= 2 && message.players.every(player => isRecord(player)
+          && hasExactKeys(player, ['connectionId', 'slot']) && validString(player.connectionId) && validSlot(player.slot))
+        && new Set(message.players.map(player => player.slot)).size === message.players.length;
+      break;
+    case 'input-ack':
+      valid = hasExactKeys(message, ['version', 'type', 'matchId', 'seq']) && validString(message.matchId)
+        && Number.isSafeInteger(message.seq) && message.seq >= 0;
+      break;
+    case 'state-frame': {
+      const snapshot = message.snapshot;
+      valid = hasExactKeys(message, ['version', 'type', 'matchId', 'tick', 'snapshot', 'events'])
+        && validString(message.matchId) && Number.isSafeInteger(message.tick) && message.tick >= 0
+        && isJsonData(snapshot) && isRecord(snapshot) && snapshot.tick === message.tick
+        && Array.isArray(snapshot.players) && snapshot.players.length === 2
+        && snapshot.players.every(validPlayer)
+        && new Set(snapshot.players.map(player => player.slot)).size === 2
+        && snapshot.players.some(player => player.slot === 1) && snapshot.players.some(player => player.slot === 2)
+        && Array.isArray(message.events) && isJsonData(message.events);
+      break;
+    }
+    case 'match-aborted':
+      valid = hasExactKeys(message, ['version', 'type', 'matchId', 'reason'])
+        && validString(message.matchId) && validString(message.reason);
+      break;
+    case 'error':
+      valid = hasExactKeys(message, ['version', 'type', 'code', 'message'])
+        && validString(message.code) && validString(message.message);
+      break;
+    default:
+      return { ok: false, code: 'unsupported-message-type' };
+  }
+  if (!valid) return { ok: false, code: 'invalid-message' };
+  return { ok: true, value: jsonCopy(message, 'server message') };
+}
+
 export function createStateFrameMessage(matchId, snapshot, events) {
   if (typeof matchId !== 'string' || matchId.length === 0) throw new TypeError('matchId is required');
   const snapshotCopy = jsonCopy(snapshot, 'snapshot');
