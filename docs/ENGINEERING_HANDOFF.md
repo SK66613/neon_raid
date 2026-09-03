@@ -15,7 +15,7 @@ Current multiplayer scope is the Warden-X boss encounter only. Multiplayer Stage
 | --- | --- |
 | Repository | `SK66613/neon_raid` |
 | Default branch | `main` |
-| Verified implementation baseline | `77e691779ef45e3b2234f74514f7f1b6d8677bdb` |
+| Verified implementation baseline | `9df9e6287605c62288e9101472be9d26fa24691e` |
 | Status date | 2026-09-03 |
 | Production | <https://neon-raid.cyberian13.workers.dev/> |
 
@@ -25,7 +25,7 @@ The baseline SHA identifies the code and production implementation state audited
 
 This is a manual production smoke observation, not automated proof. It does not establish reconnect/rejoin, multiplayer Stage 1, four-player support, or active-match persistence.
 
-After PR #13 deployed on 2026-09-03, PC and phone startup was manually reverified using a completely new room: the shared Warden-X match started and gameplay was visible. The earlier WAITING observation was not reproduced in this fresh-room check, and its cause remains unknown. Interrupting phone Wi-Fi produced `NETWORK DISCONNECTED`, as expected while production browser reconnect opt-in remains disabled by default.
+After PR #13 deployed on 2026-09-03, PC and phone startup was manually reverified using a completely new room: the shared Warden-X match started and gameplay was visible. The earlier WAITING observation was not reproduced in this fresh-room check, and its cause remains unknown. Interrupting phone Wi-Fi produced `NETWORK DISCONNECTED`, as expected at that time while production browser reconnect opt-in was disabled. Public co-op composition now explicitly enables reconnect capability, but production reconnect has not yet been manually verified after this enablement.
 
 ## High-level architecture
 
@@ -101,12 +101,12 @@ The merge history records these architectural milestones:
 - Remote Raider, boss, and projectile interpolation.
 - Same-origin HTTPS/WSS production deployment.
 - The PR #11 reconnect-capable server foundation and PR #12 browser reconnect machinery remain implemented and covered by automated tests.
-- Browser reconnect capability is temporarily disabled by default; ordinary production members retain immediate-disconnect behavior.
+- Public co-op composition explicitly enables reconnect capability in `Game.js`; the lower-level `NetworkGameSession` constructor default remains `false`.
 
 ### CI and automated validation coverage
 
 - Source/assets checks; simulation, session, room/protocol, multiplayer simulation, shared kinematics, authoritative room, network session, and cross-layer multiplayer tests.
-- The cross-layer suite joins the actual `NetworkGameSession`, Worker router, `RaidRoom`, and `AuthoritativeMatchHost` through deterministic test-only infrastructure. It covers ordinary startup and internally opted-in reconnect startup, active resume, post-resume frames, ticket rotation, and the reservation propagation race.
+- The cross-layer suite joins the actual `NetworkGameSession`, Worker router, `RaidRoom`, and `AuthoritativeMatchHost` through deterministic test-only infrastructure. It proves the reconnect-capable client/server contract while covering ordinary startup, reconnect-capable startup, active resume, post-resume frames, ticket rotation, and the reservation propagation race.
 - Vite build, build verification, deployment-config verification, Worker dry-run, and Chromium smoke.
 
 ## Known limitations
@@ -124,4 +124,4 @@ These are deferred scope, not necessarily defects:
 
 ## Server reconnect foundation (2026-09-02)
 
-PR #11 implemented opt-in, authenticated, eight-second reconnectable membership in `RaidRoom`; that server foundation remains intact. PR #12 implemented the browser ticket and bounded `resume=1` retry machinery, which also remains in code. Browser capability remains disabled by default: production `NetworkGameSession` connections use the ordinary member transport without `reconnect=1`, receive no resume ticket, and retain immediate-disconnect behavior. A deterministic cross-layer suite now demonstrates compatibility between the real client and server state machines when reconnect is enabled through the internal test option; it does not establish the cause of the earlier production observation or replace a future production reconnect smoke. No credential is placed in URLs, public connection information, events, or browser persistence.
+PR #11 implemented opt-in, authenticated, eight-second reconnectable membership in `RaidRoom`; that server foundation remains intact. PR #12 implemented the browser ticket and bounded `resume=1` retry machinery, which also remains in code. The lower-level `NetworkGameSession` constructor default remains `false`, while `Game.js` now explicitly opts production co-op into reconnectable transport with `reconnect=1`. A deterministic cross-layer suite proves compatibility between the real reconnect-capable client and server state machines; it does not establish the cause of the earlier production observation or replace the required post-merge production reconnect smoke. Production reconnect has not yet been manually verified after this enablement. No credential is placed in URLs, public connection information, events, or browser persistence.

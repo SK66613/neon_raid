@@ -88,20 +88,21 @@ Record observed results rather than treating this checklist as proof that unperf
 
 ## Reconnect transport capability
 
-The room WebSocket route selectively forwards the internal non-secret flags `reconnect=1` (fresh opt-in connection) and `resume=1` (pending authenticated resume), never arbitrary query parameters or resume tokens. Supplying both flags, or malformed values, returns HTTP 400. This server capability remains available, but the production browser flow temporarily omits `reconnect=1` and therefore uses ordinary immediate-disconnect membership. Credentials remain private and memory-only when the capability is exercised in tests.
+The room WebSocket route selectively forwards the internal non-secret flags `reconnect=1` (fresh opt-in connection) and `resume=1` (pending authenticated resume), never arbitrary query parameters or resume tokens. Supplying both flags, or malformed values, returns HTTP 400. Public co-op now explicitly enables the capability, so its fresh WebSocket includes `reconnect=1`. Credentials remain private and memory-only.
 
 ### 2026-09-03 startup incident
 
 Production validation after PR #12 observed that a room could be created and joined and membership could reach two Raiders, but the playable Warden-X match did not start/load. The exact runtime cause is not yet proven. The emergency mitigation disables the browser's default reconnect capability, restoring the previously verified ordinary-member startup path while leaving the server foundation and browser reconnect implementation intact for investigation behind cross-layer coverage.
 
-After PR #13 deployed, a completely new room was manually verified on PC and phone on 2026-09-03: the Warden-X match started and gameplay was visible. This did not reproduce the earlier WAITING observation and does not prove its cause. Interrupting Wi-Fi on the phone currently produces `NETWORK DISCONNECTED`, which is expected because browser reconnect opt-in remains disabled. Production reconnect smoke is deferred until that opt-in is re-enabled.
+After PR #13 deployed, a completely new room was manually verified on PC and phone on 2026-09-03: the Warden-X match started and gameplay was visible. This did not reproduce the earlier WAITING observation and does not prove its cause. Browser reconnect opt-in has now been re-enabled at the public co-op composition boundary. Production reconnect has not yet been manually verified after this enablement.
 
 
-## Manual production reconnect smoke (deferred while browser opt-in is disabled)
+## Manual production reconnect smoke — REQUIRED POST-MERGE VALIDATION
 
 1. Start a live Warden-X match with Device A and Device B.
-2. Without refreshing either page, temporarily interrupt one device's network. Confirm its last authoritative scene remains visible with `NETWORK INTERRUPTED — RECONNECTING…`.
-3. Restore the network within the advertised grace. Expect the same match, Raider slot, logical connection, and continuing boss state, followed by `CONNECTION RESTORED — RAID CONTINUES`.
-4. Repeat, but leave the network unavailable beyond the grace. Expect recovery to stop and the survivor eventually to receive the existing match-aborted/waiting behavior.
+2. **A. First reconnect:** without refreshing either page, temporarily interrupt one device's network. Confirm its last authoritative scene remains visible with `NETWORK INTERRUPTED — RECONNECTING…`; restore the network within the advertised grace and expect the same match, Raider slot, logical connection, and continuing boss state, followed by `CONNECTION RESTORED — RAID CONTINUES`.
+3. **B. Normal gameplay after reconnect:** verify ordinary movement, fire, authoritative frames, and shared boss progression continue after the first reconnect.
+4. **C. Second reconnect using rotated credential behavior:** interrupt and restore the same device again within the grace; expect a second successful resume using the server-rotated credential behavior, without exposing the credential.
+5. **D. Disconnect beyond 8 seconds:** repeat, but leave the network unavailable beyond eight seconds. Expect recovery to stop and the survivor eventually to receive the existing match-aborted/waiting behavior.
 
 Do not use refresh/reload for this smoke: this PR deliberately keeps resume credentials in JavaScript memory only. Record actual observations; this procedure has not yet been manually verified in production.

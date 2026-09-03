@@ -1,4 +1,10 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+
+test('public co-op composition enables reconnect capability', () => {
+  const gameSource = readFileSync(new URL('../src/game/Game.js', import.meta.url), 'utf8');
+  expect(gameSource).toMatch(/createNetworkGameSession\(\{[^}]*reconnectCapable: true,/s);
+});
 
 test('v0.5 boots, plays Stage 1, and enters the Warden-X fight', async ({ page }) => {
   const browserErrors = [];

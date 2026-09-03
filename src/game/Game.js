@@ -29,7 +29,7 @@ export function startGame() {
     try {
       if (networkMode) {
         const create = params.get('coop') === 'create';
-        session = await createNetworkGameSession({ mode: create ? 'create' : 'join', roomId: params.get('room'),
+        session = await createNetworkGameSession({ mode: create ? 'create' : 'join', roomId: params.get('room'), reconnectCapable: true,
           origin: window.location.origin, onRoomCreated: roomId => {
             const url = new URL(window.location.href); url.search = ''; url.searchParams.set('coop', 'join'); url.searchParams.set('room', roomId);
             history.replaceState(null, '', url);
