@@ -15,7 +15,7 @@ Current multiplayer scope is the Warden-X boss encounter only. Multiplayer Stage
 | --- | --- |
 | Repository | `SK66613/neon_raid` |
 | Default branch | `main` |
-| Verified implementation baseline | `e43de25e7330e9b82894db49577286f5931d6ac5` |
+| Verified implementation baseline | `77e691779ef45e3b2234f74514f7f1b6d8677bdb` |
 | Status date | 2026-09-03 |
 | Production | <https://neon-raid.cyberian13.workers.dev/> |
 
@@ -24,6 +24,8 @@ The baseline SHA identifies the code and production implementation state audited
 **FIRST ONLINE PLAYABLE has been reached.** On 2026-09-02, production was manually exercised with a desktop browser and a phone browser. Device A created a room and received a shareable URL; Device B joined that same URL. The authoritative room started after both connected, the Warden-X scene contained two Raiders and one shared boss, and both players could move and shoot.
 
 This is a manual production smoke observation, not automated proof. It does not establish reconnect/rejoin, multiplayer Stage 1, four-player support, or active-match persistence.
+
+After PR #13 deployed on 2026-09-03, PC and phone startup was manually reverified using a completely new room: the shared Warden-X match started and gameplay was visible. The earlier WAITING observation was not reproduced in this fresh-room check, and its cause remains unknown. Interrupting phone Wi-Fi produced `NETWORK DISCONNECTED`, as expected while production browser reconnect opt-in remains disabled by default.
 
 ## High-level architecture
 
@@ -103,7 +105,8 @@ The merge history records these architectural milestones:
 
 ### CI and automated validation coverage
 
-- Source/assets checks; simulation, session, room/protocol, multiplayer simulation, shared kinematics, authoritative room, and network session tests.
+- Source/assets checks; simulation, session, room/protocol, multiplayer simulation, shared kinematics, authoritative room, network session, and cross-layer multiplayer tests.
+- The cross-layer suite joins the actual `NetworkGameSession`, Worker router, `RaidRoom`, and `AuthoritativeMatchHost` through deterministic test-only infrastructure. It covers ordinary startup and internally opted-in reconnect startup, active resume, post-resume frames, ticket rotation, and the reservation propagation race.
 - Vite build, build verification, deployment-config verification, Worker dry-run, and Chromium smoke.
 
 ## Known limitations
@@ -121,4 +124,4 @@ These are deferred scope, not necessarily defects:
 
 ## Server reconnect foundation (2026-09-02)
 
-PR #11 implemented opt-in, authenticated, eight-second reconnectable membership in `RaidRoom`; that server foundation remains intact. PR #12 implemented the browser ticket and bounded `resume=1` retry machinery, which also remains in code. After production validation found a fresh-match startup regression, the browser capability was temporarily disabled by default: production `NetworkGameSession` connections now use the ordinary member transport without `reconnect=1`, receive no resume ticket, and retain immediate-disconnect behavior. The cross-layer failure has not yet been identified. Reconnect is exercised only through an internal test option until startup is understood and proven in production. No credential is placed in URLs, public connection information, events, or browser persistence.
+PR #11 implemented opt-in, authenticated, eight-second reconnectable membership in `RaidRoom`; that server foundation remains intact. PR #12 implemented the browser ticket and bounded `resume=1` retry machinery, which also remains in code. Browser capability remains disabled by default: production `NetworkGameSession` connections use the ordinary member transport without `reconnect=1`, receive no resume ticket, and retain immediate-disconnect behavior. A deterministic cross-layer suite now demonstrates compatibility between the real client and server state machines when reconnect is enabled through the internal test option; it does not establish the cause of the earlier production observation or replace a future production reconnect smoke. No credential is placed in URLs, public connection information, events, or browser persistence.

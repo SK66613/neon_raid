@@ -18,6 +18,7 @@
     "test:player-kinematics": "node --test tests/player-kinematics.test.js",
     "test:authoritative-room": "node --test tests/authoritative-match-host.test.js tests/raid-room.test.js",
     "test:network-session": "node --test tests/network-session.test.js tests/network-view.test.js",
+    "test:cross-layer": "node --test --test-concurrency=1 tests/network-room-integration.test.js",
     "dev:server": "npx --yes wrangler@4.33.1 dev",
     "build:server": "npx --yes wrangler@4.33.1 deploy --dry-run --outdir dist-worker",
     "deploy": "npm run build && npm run verify:build && npm run verify:deploy && npx --yes wrangler@4.33.1 deploy"
