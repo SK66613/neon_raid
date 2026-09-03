@@ -25,7 +25,7 @@ The baseline SHA identifies the code and production implementation state audited
 
 This is a manual production smoke observation, not automated proof. It does not establish reconnect/rejoin, multiplayer Stage 1, four-player support, or active-match persistence.
 
-After PR #13 deployed on 2026-09-03, PC and phone startup was manually reverified using a completely new room: the shared Warden-X match started and gameplay was visible. The earlier WAITING observation was not reproduced in this fresh-room check, and its cause remains unknown. Interrupting phone Wi-Fi produced `NETWORK DISCONNECTED`, as expected at that time while production browser reconnect opt-in was disabled. Public co-op composition now explicitly enables reconnect capability, but production reconnect has not yet been manually verified after this enablement.
+After PR #13 deployed on 2026-09-03, PC and phone startup was manually reverified using a completely new room: the shared Warden-X match started and gameplay was visible. The earlier WAITING observation was not reproduced in this fresh-room check, and its cause remains unknown. PR #15 then enabled public reconnect. In the subsequent production test, interrupting and restoring phone Wi-Fi froze the phone game and ultimately produced `NETWORK DISCONNECTED`; reloading correctly did not recover the memory-only credential. Production reconnect is therefore **not verified** and requires an owner retest after the fix is deployed.
 
 ## High-level architecture
 
@@ -106,7 +106,7 @@ The merge history records these architectural milestones:
 ### CI and automated validation coverage
 
 - Source/assets checks; simulation, session, room/protocol, multiplayer simulation, shared kinematics, authoritative room, network session, and cross-layer multiplayer tests.
-- The cross-layer suite joins the actual `NetworkGameSession`, Worker router, `RaidRoom`, and `AuthoritativeMatchHost` through deterministic test-only infrastructure. It proves the reconnect-capable client/server contract while covering ordinary startup, reconnect-capable startup, active resume, post-resume frames, ticket rotation, and the reservation propagation race.
+- The cross-layer suite joins the actual `NetworkGameSession`, Worker router, `RaidRoom`, and `AuthoritativeMatchHost` through deterministic test-only infrastructure. It reproduces the delayed server-departure ordering behind the production failure: before mitigation, resume upgrades received 409 while the old transport remained active and no reservation existed. Authenticated resume can now atomically replace that stale live transport, while reservation-first resume, late old-socket callbacks, post-resume frames, and ticket rotation remain covered.
 - Vite build, build verification, deployment-config verification, Worker dry-run, and Chromium smoke.
 
 ## Known limitations
