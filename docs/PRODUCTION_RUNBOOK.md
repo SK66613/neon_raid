@@ -96,15 +96,16 @@ Production validation after PR #12 observed that a room could be created and joi
 
 After PR #13 deployed, a completely new room was manually verified on PC and phone on 2026-09-03: the Warden-X match started and gameplay was visible. This did not reproduce the earlier WAITING observation and does not prove its cause. Browser reconnect opt-in has now been re-enabled at the public co-op composition boundary. Production reconnect has not yet been manually verified after this enablement.
 
-After PR #15 enabled public reconnect, a PC-and-phone test interrupted and restored phone Wi-Fi during a fresh active Warden-X match. The phone froze and ended at `NETWORK DISCONNECTED`; refresh did not restore the intentionally memory-only credential. The delayed server-departure ordering is now covered by authenticated stale-transport takeover, but production reconnect remains **required and unverified** until the owner repeats this smoke after deployment.
+After PR #15 enabled public reconnect, PC-and-phone tests interrupted and restored phone Wi-Fi during fresh active Warden-X matches. One reconnect succeeded, but the repeatable result froze and ended at `NETWORK DISCONNECTED`; refresh did not restore the intentionally memory-only credential. PR #16's client-first delayed-server-departure ordering remains covered by authenticated stale-transport takeover. The opposite server-first ordering, where the browser socket stays OPEN but frames stop, is now covered by the authoritative-frame watchdog. Production reconnect remains **required and unverified** until the owner repeats this smoke after deployment.
 
 
 ## Manual production reconnect smoke — REQUIRED POST-MERGE VALIDATION
 
 1. Create a fresh room and start a live Warden-X match with Device A and Device B.
-2. **A. First reconnect:** without refreshing either page, temporarily interrupt one device's network. Confirm its last authoritative scene remains visible with `NETWORK INTERRUPTED — RECONNECTING…`; restore the network within the advertised grace and expect the same match, Raider slot, logical connection, and continuing boss state, followed by `CONNECTION RESTORED — RAID CONTINUES`.
-3. **B. Normal gameplay after reconnect:** verify ordinary movement, fire, authoritative frames, and shared boss progression continue after the first reconnect.
-4. **C. Second reconnect using rotated credential behavior:** interrupt and restore the same device again within the grace; expect a second successful resume using the server-rotated credential behavior, without exposing the credential.
-5. **D. Disconnect beyond 8 seconds:** repeat, but leave the network unavailable beyond eight seconds. Expect recovery to stop and the survivor eventually to receive the existing match-aborted/waiting behavior.
+2. Turn phone Wi-Fi off for approximately two seconds, then turn it on again. Do **not** refresh.
+3. Expect `NETWORK INTERRUPTED — RECONNECTING…`, then `CONNECTION RESTORED — RAID CONTINUES` in the same match and Raider slot.
+4. Continue movement and fire for at least ten seconds, confirming authoritative frames and shared boss progression continue.
+5. Repeat the approximately two-second Wi-Fi interruption on the same phone and verify a second resume with rotated credential behavior.
+6. Only after both short interruptions pass, test a greater-than-eight-second outage separately; expect terminal disconnect/abort rather than silent identity replacement.
 
 Do not use refresh/reload for this smoke: this PR deliberately keeps resume credentials in JavaScript memory only. Record actual observations; this procedure has not yet been manually verified in production.

@@ -144,6 +144,12 @@ export function createInMemoryMultiplayerHarness() {
       return { depart: async () => { if (!serverFirst) { room.webSocketError(server); trace.push({ direction: 'lifecycle',
         event: 'reservation-created', connection: browser.connection, count: room.reservations.size }); await queue.flush(); } } };
     },
+    serverDepartWithoutBrowserNotification(browser) {
+      const room = roomForSocket(browser.server);
+      room.webSocketError(browser.server);
+      trace.push({ direction: 'lifecycle', event: 'reservation-created', connection: browser.connection,
+        count: room.reservations.size });
+    },
     restore() { globalThis.Response = originals.Response; globalThis.WebSocketPair = originals.WebSocketPair; if (originals.WebSocket === undefined) delete globalThis.WebSocket; else globalThis.WebSocket = originals.WebSocket; },
   };
 }
