@@ -12,6 +12,15 @@ export const PLAYER_CONFIG = Object.freeze({
   dashDistance: 62, dashDuration: 0.15, dashCooldown: 1.45,
 });
 
+export const BOSS_CONFIG = Object.freeze({
+  initialAttackDelay: 1.20,
+  attackInterval: Object.freeze({
+    1: 1.20,
+    2: 1.00,
+    3: 0.82,
+  }),
+});
+
 export const DANGER_CONFIG = Object.freeze({
   1: Object.freeze([{ xRange: 55, yRange: 30, minX: 35, maxX: 325, minY: 280, maxY: 490, radius: 30, delay: 1 }]),
   2: Object.freeze([{ xRange: 75, yRange: 46, minX: 32, maxX: 328, minY: 275, maxY: 492, radius: 32, delay: 0.82 }]),

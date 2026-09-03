@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MultiplayerBossSimulation } from '../src/game/multiplayer/MultiplayerBossSimulation.js';
-import { DANGER_CONFIG, MULTIPLAYER_TICK_DT, MULTIPLAYER_TICK_HZ } from '../src/game/multiplayer/config.js';
+import { BOSS_CONFIG, DANGER_CONFIG, MULTIPLAYER_TICK_DT, MULTIPLAYER_TICK_HZ } from '../src/game/multiplayer/config.js';
 import { createSeededRng } from '../src/game/simulation/rng.js';
 
 const create = (seed = 7) => new MultiplayerBossSimulation({ rng: createSeededRng(seed) });
@@ -10,6 +10,14 @@ const player = (g, slot) => g.getSnapshot().players[slot - 1];
 const setup = g => g.createTestAdapter();
 const fireOnce = (g, slot) => { g.applyCommand(slot, { type: 'fire', active: true }); g.step(0); g.applyCommand(slot, { type: 'fire', active: false }); };
 const eventTypes = g => g.drainEvents().map(event => event.type);
+const advanceBy = (g, seconds) => {
+  let remaining = seconds;
+  while (remaining > 0) {
+    const dt = Math.min(remaining, MULTIPLAYER_TICK_DT);
+    g.step(dt);
+    remaining -= dt;
+  }
+};
 
 test('1 starts with exactly slots 1 and 2', () => assert.deepEqual(create().getSnapshot().players.map(p => p.slot), [1, 2]));
 test('2 players own independent resource values', () => { const g=create();setup(g).setPlayer(1,{ammo:3});assert.equal(player(g,2).ammo,28); });
@@ -32,8 +40,11 @@ test('18 dead Raider is excluded from boss targeting', () => { const g=create();
 test('19 both deaths emit match-lost exactly once', () => { const g=create();g.drainEvents();g.damagePlayer(1,200);g.damagePlayer(2,200);g.damagePlayer(2,200);assert.equal(eventTypes(g).filter(x=>x==='match-lost').length,1);assert.equal(g.getSnapshot().status,'lost'); });
 test('20 both players damage one canonical boss', () => { const g=create();g.applyCommand(1,{type:'grenade'});g.applyCommand(2,{type:'grenade'});g.step(0);assert.equal(g.getSnapshot().boss.hp,990); });
 test('21 boss starts at exactly 1200 HP', () => assert.equal(create().getSnapshot().boss.hp,1200));
-test('22 phase threshold activation waits for pattern boundary', () => { const g=create();g.damageBoss(401);assert.equal(g.getSnapshot().boss.phase,1);g.step(.02);assert.equal(g.getSnapshot().boss.phase,1);stepFor(g,.8);assert.equal(g.getSnapshot().boss.phase,2); });
+test('22 phase threshold activation waits for pattern boundary', () => { const g=create();g.damageBoss(401);assert.equal(g.getSnapshot().boss.phase,1);g.step(.02);assert.equal(g.getSnapshot().boss.phase,1);advanceBy(g,BOSS_CONFIG.initialAttackDelay);assert.equal(g.getSnapshot().boss.phase,2); });
 test('23 danger phase bounds/configuration remain exact', () => { assert.deepEqual(DANGER_CONFIG[1],[{xRange:55,yRange:30,minX:35,maxX:325,minY:280,maxY:490,radius:30,delay:1}]);assert.deepEqual(DANGER_CONFIG[2],[{xRange:75,yRange:46,minX:32,maxX:328,minY:275,maxY:492,radius:32,delay:.82}]);assert.deepEqual(DANGER_CONFIG[3].map(z=>[z.minX,z.maxX,z.minY,z.maxY,z.xRange,z.yRange,z.radius,z.delay]),[[30,330,270,494,90,54,34,.65],[30,330,270,494,90,54,28,.78]]); });
+test('Warden-X waits for its configured initial attack delay', () => { const g=create(),epsilon=MULTIPLAYER_TICK_DT/2;assert.equal(g.getSnapshot().boss.attackTimer,BOSS_CONFIG.initialAttackDelay);g.drainEvents();advanceBy(g,BOSS_CONFIG.initialAttackDelay-epsilon);assert.equal(eventTypes(g).includes('enemy-shot'),false);advanceBy(g,epsilon*2);assert.equal(eventTypes(g).filter(type=>type==='enemy-shot').length,1); });
+test('Warden-X attack intervals are canonical and progressively faster', () => { assert.deepEqual(BOSS_CONFIG.attackInterval,{1:1.20,2:1.00,3:.82});assert.ok(BOSS_CONFIG.attackInterval[1]>BOSS_CONFIG.attackInterval[2]);assert.ok(BOSS_CONFIG.attackInterval[2]>BOSS_CONFIG.attackInterval[3]);for(const [phase,hp] of [[1,1200],[2,799],[3,399]]){const g=create();setup(g).setBoss({hp,attackTimer:0});g.step(0);const boss=g.getSnapshot().boss;assert.equal(boss.phase,phase);assert.equal(boss.attackTimer,BOSS_CONFIG.attackInterval[phase]);} });
+test('Warden-X patterns retain their projectile counts and damage', () => { for(const [phase,hp,rngValue,count,damage] of [[1,1200,0,5,10],[2,799,0,7,10],[2,799,1,11,9],[3,399,0,15,9],[3,399,1,9,10]]){const g=new MultiplayerBossSimulation({rng:{next:()=>rngValue}});setup(g).setBoss({hp,attackTimer:0});g.step(0);const bullets=g.getSnapshot().enemyBullets;assert.equal(g.getSnapshot().boss.phase,phase);assert.equal(bullets.length,count);assert.ok(bullets.every(bullet=>bullet.damage===damage));} });
 test('24 burst deterministically alternates living targets', () => { const g=create();setup(g).setBoss({attackTimer:0});g.step(0);assert.equal(g.getSnapshot().enemyBullets[0].targetSlot,1);setup(g).setBoss({attackTimer:0});g.step(0);assert.equal(g.getSnapshot().enemyBullets.at(-1).targetSlot,1); /* danger placement consumes slot 2 */ });
 test('25 boss projectile can damage slot 1', () => { const g=create();setup(g).addEnemyBullet({id:'enemy-bullet-1',x:145,y:468,vx:0,vy:0,life:1,radius:4,damage:10});g.step(0);assert.equal(player(g,1).armor,50); });
 test('26 boss projectile can damage slot 2', () => { const g=create();setup(g).addEnemyBullet({id:'enemy-bullet-1',x:215,y:468,vx:0,vy:0,life:1,radius:4,damage:10});g.step(0);assert.equal(player(g,2).armor,50); });

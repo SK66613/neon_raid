@@ -1,4 +1,4 @@
-import { PLAYER_CONFIG } from './config.js';
+import { BOSS_CONFIG, PLAYER_CONFIG } from './config.js';
 
 const createPlayer = (slot, x) => ({
   slot, x, y: 468, radius: PLAYER_CONFIG.radius, vx: 0, vy: 0,
@@ -16,7 +16,7 @@ export function createMultiplayerBossState() {
     tick: 0, status: 'active',
     players: [createPlayer(1, 145), createPlayer(2, 215)],
     boss: { id: 'warden-x', x: 180, y: 195, radius: 52, hp: 1200,
-      maxHp: 1200, phase: 1, frameTimer: 0, attackTimer: 0.8,
+      maxHp: 1200, phase: 1, frameTimer: 0, attackTimer: BOSS_CONFIG.initialAttackDelay,
       attackFrame: -1, flashTimer: 0, moveTimer: 0, smokeTimer: 0,
       targetCursor: 0 },
     bullets: [], enemyBullets: [], dangerZones: [],
