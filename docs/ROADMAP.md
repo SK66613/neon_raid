@@ -8,12 +8,13 @@ This is the current engineering order, not a promise to implement every possible
 
 ## Next engineering order
 
-Browser resume is implemented and public co-op explicitly opts into it. PR #16 covers client-first stale-transport takeover, and the authoritative-frame watchdog covers the reproduced server-first OPEN-but-stalled ordering. Real-phone reconnect has still repeatedly ended at `NETWORK DISCONNECTED` despite one observed success, so production reconnect remains unverified pending an owner retest. The next work order is:
+Browser resume is implemented and public co-op explicitly opts into it. PR #16 covers client-first stale-transport takeover, and PR #19's authoritative-frame watchdog is deployed for the reproduced server-first OPEN-but-stalled ordering. A fresh two-player real-phone test still ended at `NETWORK DISCONNECTED` after Wi-Fi was off for roughly 2–3 seconds and did not recover after 10–20 seconds. The watchdog alone was not sufficient, so production reconnect remains broken / unverified. The next work order is:
 
-1. Run a production two-device reconnect smoke covering first resume, normal gameplay after resume, second resume with the rotated credential, and failure beyond eight seconds.
-2. Fix any remaining production-only reconnect issue if one is observed.
-3. Add multiplayer diagnostics and observability.
-4. Add the Telegram Mini App identity and invite layer.
+1. Run a production two-device reconnect smoke and screenshot the compact reason/trigger/`A/O/W/S` diagnostic summary if it fails.
+2. Use the safe in-memory trace to determine whether failure occurs while connecting, authenticating, synchronizing, or after synchronization.
+3. Do not select another behavior fix until that evidence identifies the failing stage; then retest first resume, normal gameplay, second resume with the rotated credential, and failure beyond eight seconds.
+4. Add multiplayer diagnostics and observability.
+5. Add the Telegram Mini App identity and invite layer.
 
 Do not proceed to Telegram until this order is complete and reliable browser multiplayer is re-established.
 

@@ -96,7 +96,9 @@ Production validation after PR #12 observed that a room could be created and joi
 
 After PR #13 deployed, a completely new room was manually verified on PC and phone on 2026-09-03: the Warden-X match started and gameplay was visible. This did not reproduce the earlier WAITING observation and does not prove its cause. Browser reconnect opt-in has now been re-enabled at the public co-op composition boundary. Production reconnect has not yet been manually verified after this enablement.
 
-After PR #15 enabled public reconnect, PC-and-phone tests interrupted and restored phone Wi-Fi during fresh active Warden-X matches. One reconnect succeeded, but the repeatable result froze and ended at `NETWORK DISCONNECTED`; refresh did not restore the intentionally memory-only credential. PR #16's client-first delayed-server-departure ordering remains covered by authenticated stale-transport takeover. The opposite server-first ordering, where the browser socket stays OPEN but frames stop, is now covered by the authoritative-frame watchdog. Production reconnect remains **required and unverified** until the owner repeats this smoke after deployment.
+After PR #15 enabled public reconnect, PC-and-phone tests interrupted and restored phone Wi-Fi during fresh active Warden-X matches. One reconnect succeeded, but the repeatable result froze and ended at `NETWORK DISCONNECTED`; refresh did not restore the intentionally memory-only credential. PR #16's client-first delayed-server-departure ordering remains covered by authenticated stale-transport takeover. PR #19's authoritative-frame watchdog is deployed, but a subsequent fresh two-player phone test still failed after a roughly 2–3 second Wi-Fi interruption and did not recover after waiting 10–20 seconds. The watchdog alone was not sufficient. Production reconnect remains **broken / unverified**.
+
+The failure status now includes a compact, screenshot-friendly reason, trigger, and `A#/O#/W#/S#` summary (attempts created/opened, welcomes, and sync frames). During the next required production test, capture that complete status and, if available, the safe memory-only result of `window.__NEON_NETWORK_DEBUG()`. It contains no resume credential. Do not choose another reconnect behavior change until this trace identifies the failing stage.
 
 
 ## Manual production reconnect smoke — REQUIRED POST-MERGE VALIDATION
@@ -105,7 +107,8 @@ After PR #15 enabled public reconnect, PC-and-phone tests interrupted and restor
 2. Turn phone Wi-Fi off for approximately two seconds, then turn it on again. Do **not** refresh.
 3. Expect `NETWORK INTERRUPTED — RECONNECTING…`, then `CONNECTION RESTORED — RAID CONTINUES` in the same match and Raider slot.
 4. Continue movement and fire for at least ten seconds, confirming authoritative frames and shared boss progression continue.
-5. Repeat the approximately two-second Wi-Fi interruption on the same phone and verify a second resume with rotated credential behavior.
-6. Only after both short interruptions pass, test a greater-than-eight-second outage separately; expect terminal disconnect/abort rather than silent identity replacement.
+5. If recovery fails, screenshot the complete compact reconnect summary before refreshing and report its reason, trigger, and `A/O/W/S` counts.
+6. Repeat the approximately two-second Wi-Fi interruption on the same phone and verify a second resume with rotated credential behavior.
+7. Only after both short interruptions pass, test a greater-than-eight-second outage separately; expect terminal disconnect/abort rather than silent identity replacement.
 
 Do not use refresh/reload for this smoke: this PR deliberately keeps resume credentials in JavaScript memory only. Record actual observations; this procedure has not yet been manually verified in production.

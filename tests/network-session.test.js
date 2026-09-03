@@ -334,6 +334,12 @@ test('active interruption authenticates privately, freezes, and accepts a same-t
   resume.emit('message', message('state-frame', { matchId: 'm1', tick: 100, snapshot: synced, events: [] }));
   assert.equal(session.getStatus(), SessionStatus.READY); assert.equal(session.getRenderSnapshot().players[1].x, 333);
   assert.deepEqual(session.drainEvents(), [{ type: 'network-resumed' }]);
+  assert.deepEqual(session.getNetworkDiagnostics().reconnect, {
+    trigger: 'socket-error', attemptsCreated: 1, attemptsOpened: 1, resumeEnvelopesSent: 1,
+    welcomeReceived: 1, rotatedTicketReceived: 1, syncFramesReceived: 1,
+    attemptErrors: 0, attemptCloses: 0, attemptTimeouts: 0, terminalReason: null, elapsedMs: 0,
+  });
+  assert.ok(session.getNetworkDiagnostics().trace.some(entry => entry.stage === 'network-resumed'));
   session.update(0);
   assert.deepEqual(resume.sent.slice(1).map(item => [item.seq, item.command.type]), [[0, 'move'], [1, 'fire']]);
   assert.equal(session.getConnectionInfo().lastAckSeq, null);
@@ -353,6 +359,11 @@ test('active interruption authenticates privately, freezes, and accepts a same-t
 
   resume.emit('close', {});
   assert.equal(session.getStatus(), SessionStatus.RECONNECTING);
+  assert.deepEqual(session.getNetworkDiagnostics().reconnect, {
+    trigger: 'socket-close', attemptsCreated: 1, attemptsOpened: 0, resumeEnvelopesSent: 0,
+    welcomeReceived: 0, rotatedTicketReceived: 0, syncFramesReceived: 0,
+    attemptErrors: 0, attemptCloses: 0, attemptTimeouts: 0, terminalReason: null, elapsedMs: 0,
+  });
   assert.deepEqual(session.drainEvents(), [{ type: 'network-reconnecting', graceMs: 8000 }]);
   const secondResume = FakeSocket.instances[2]; secondResume.emit('open');
   assert.equal(secondResume.sent[0].resumeToken, rotated);
@@ -369,7 +380,7 @@ test('active interruption authenticates privately, freezes, and accepts a same-t
   assert.equal(session.getSnapshot().tick, 103);
   assert.equal(secondResume.closeArgs, undefined);
   assert.deepEqual(session.drainEvents(), []);
-  for (const publicValue of [socket.url, resume.url, session.getConnectionInfo(), ...session.drainEvents()]) {
+  for (const publicValue of [socket.url, resume.url, session.getConnectionInfo(), session.getNetworkDiagnostics(), ...session.drainEvents()]) {
     assert.equal(JSON.stringify(publicValue).includes(token), false);
     assert.equal(JSON.stringify(publicValue).includes(rotated), false);
   }
@@ -393,6 +404,7 @@ test('an OPEN active transport stall resumes with rotated credentials and remain
   assert.equal(session.getStatus(), SessionStatus.RECONNECTING);
   assert.equal(FakeSocket.instances.length, 2);
   assert.deepEqual(session.drainEvents(), [{ type: 'network-reconnecting', graceMs: 8000 }]);
+  assert.equal(session.getNetworkDiagnostics().reconnect.trigger, 'watchdog');
 
   const resume = FakeSocket.instances[1]; assert.equal(new URL(resume.url).search, '?resume=1'); resume.emit('open');
   assert.equal(resume.sent[0].resumeToken, firstToken);
@@ -436,6 +448,9 @@ test('resume attempts are bounded, race-safe, and expire once at the absolute de
   socket.emit('message', frame('m1', 4)); socket.emit('close', {});
   const attempt1 = FakeSocket.instances[1];
   scheduler.advance(1500); assert.deepEqual(attempt1.closeArgs, [1000, 'Resume attempt timed out']);
+  assert.equal(session.getNetworkDiagnostics().reconnect.attemptsCreated, 1);
+  assert.equal(session.getNetworkDiagnostics().reconnect.attemptsOpened, 0);
+  assert.equal(session.getNetworkDiagnostics().reconnect.attemptTimeouts, 1);
   scheduler.advance(249); assert.equal(FakeSocket.instances.length, 2);
   scheduler.advance(1); const attempt2 = FakeSocket.instances[2];
   attempt1.emit('error', {}); attempt1.emit('close', {}); assert.equal(session.getStatus(), SessionStatus.RECONNECTING);
@@ -447,6 +462,7 @@ test('resume attempts are bounded, race-safe, and expire once at the absolute de
   ]);
   const count = FakeSocket.instances.length; scheduler.advance(10000); assert.equal(FakeSocket.instances.length, count);
   assert.ok(attempt2.closeArgs);
+  assert.equal(session.getNetworkDiagnostics().reconnect.terminalReason, 'reconnect-timeout');
 });
 
 test('resume rejection and identity corruption fail closed without retry, while explicit close cancels retries', async () => {
@@ -457,6 +473,7 @@ test('resume rejection and identity corruption fail closed without retry, while 
     if (corrupt === 'rejected') resume.emit('message', message('error', { code: 'resume-rejected', message: 'Resume rejected.' }));
     else resume.emit('message', message('welcome', { roomId, connectionId: 'wrong', slot: 2, capacity: 2 }));
     assert.equal(session.getStatus(), SessionStatus.ERROR); const count = FakeSocket.instances.length;
+    if (corrupt === 'rejected') assert.equal(session.getNetworkDiagnostics().reconnect.terminalReason, 'resume-rejected');
     scheduler.advance(10000); assert.equal(FakeSocket.instances.length, count);
   }
   const scheduler = new FakeScheduler(); const { session, socket } = await setup({ scheduler, reconnectCapable: true });
@@ -464,4 +481,26 @@ test('resume rejection and identity corruption fail closed without retry, while 
   socket.emit('message', frame('m2', 0)); socket.emit('close', {}); const resume = FakeSocket.instances[1];
   session.close(); assert.equal(session.getStatus(), SessionStatus.CLOSED); assert.deepEqual(resume.closeArgs, [1000, 'Session closed']);
   scheduler.advance(10000); assert.equal(FakeSocket.instances.length, 2);
+});
+
+test('network diagnostics are bounded, defensive, and never serialize resume credentials', async () => {
+  const scheduler = new FakeScheduler();
+  const { session, socket } = await setup({ scheduler, reconnectCapable: true });
+  const token = 'd'.repeat(64);
+  socket.emit('message', message('resume-ticket', {
+    matchId: 'private', connectionId: 'server-choice', resumeToken: token, graceMs: 8000,
+  }));
+  socket.emit('message', frame('private', 0));
+  socket.emit('close', {});
+
+  const diagnostics = session.getNetworkDiagnostics();
+  diagnostics.status = 'mutated'; diagnostics.reconnect.attemptsCreated = 999;
+  diagnostics.trace[0].stage = 'mutated'; diagnostics.trace.push({ stage: token });
+  const fresh = session.getNetworkDiagnostics();
+  assert.equal(fresh.status, SessionStatus.RECONNECTING);
+  assert.equal(fresh.reconnect.attemptsCreated, 1);
+  assert.notEqual(fresh.trace[0].stage, 'mutated');
+  assert.equal(fresh.trace.length <= 32, true);
+  assert.equal(JSON.stringify(fresh).includes(token), false);
+  assert.equal(JSON.stringify(fresh).includes('resumeToken'), false);
 });

@@ -63,7 +63,14 @@ export function startGame() {
         if (event.type === 'network-error') ui.status.textContent = `NETWORK ERROR — ${event.message}`;
         if (event.type === 'network-reconnecting') ui.status.textContent = 'NETWORK INTERRUPTED — RECONNECTING…';
         if (event.type === 'network-resumed') ui.status.textContent = 'CONNECTION RESTORED — RAID CONTINUES';
-        if (event.type === 'network-disconnected') ui.status.textContent = 'NETWORK DISCONNECTED';
+        if (event.type === 'network-disconnected') {
+          const diagnostic = session.getNetworkDiagnostics?.().reconnect;
+          const reason = diagnostic?.terminalReason || event.reason || 'unknown';
+          const trigger = diagnostic?.trigger ? ` — ${diagnostic.trigger}` : '';
+          const counts = diagnostic
+            ? ` — A${diagnostic.attemptsCreated}/O${diagnostic.attemptsOpened}/W${diagnostic.welcomeReceived}/S${diagnostic.syncFramesReceived}` : '';
+          ui.status.textContent = `NETWORK DISCONNECTED — ${reason}${trigger}${counts}`;
+        }
         const localEvent=!networkMode||event.slot==null||event.slot===session.getConnectionInfo().slot;
         if (event.type === 'reload-started'&&localEvent) { ui.status.textContent = 'RELOADING…'; tone(320,.05,'square',.012); }
         if (event.type === 'reload-completed'&&localEvent) { const snapshot=session.getSnapshot();ui.status.textContent=networkMode?`Warden-X: ${Math.ceil(snapshot.boss.hp)} HP`:snapshot.stage===1?'Сектор активен.':`Warden-X: ${Math.ceil(snapshot.boss.hp)} HP`; }
@@ -107,7 +114,10 @@ export function startGame() {
     document.addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k==='w'||e.key==='ArrowUp')keys.up=true;if(k==='s'||e.key==='ArrowDown')keys.down=true;if(k==='a'||e.key==='ArrowLeft')keys.left=true;if(k==='d'||e.key==='ArrowRight')keys.right=true;if(e.code==='Space'){command(fireCommand(true));e.preventDefault()}if(k==='g')command({type:CommandType.GRENADE});if(e.key==='Shift')command({type:CommandType.DASH});});document.addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='w'||e.key==='ArrowUp')keys.up=false;if(k==='s'||e.key==='ArrowDown')keys.down=false;if(k==='a'||e.key==='ArrowLeft')keys.left=false;if(k==='d'||e.key==='ArrowRight')keys.right=false;if(e.code==='Space')command(fireCommand(false));});
     window.addEventListener('blur',()=>{command(fireCommand(false));if(!networkMode){const s=session.getSnapshot();if(!s.paused&&!s.dead&&!s.won)command({type:CommandType.PAUSE})}});
     if(!networkMode)window.__NEON_TEST={get:()=>{const s=session.getSnapshot();return{stage:s.stage,x:s.player.x,y:s.player.y,ammo:s.player.ammo,bossHp:s.boss.hp,kills:s.kills,paused:s.paused,dead:s.dead,won:s.won}},skipToBoss:()=>testAdapter.skipToBoss(),completeStage1:()=>testAdapter.completeStageOne(),damageBoss:(n=100)=>testAdapter.damageBoss(n),reload:()=>{session.submit(fireCommand(false));session.submit({type:CommandType.RELOAD});session.update(0)}};
-    else window.__NEON_NET=Object.freeze({getStatus:()=>session.getStatus(),getConnectionInfo:()=>session.getConnectionInfo(),getSnapshot:()=>session.getSnapshot()});
+    else {
+      window.__NEON_NET=Object.freeze({getStatus:()=>session.getStatus(),getConnectionInfo:()=>session.getConnectionInfo(),getSnapshot:()=>session.getSnapshot()});
+      window.__NEON_NETWORK_DEBUG=()=>session.getNetworkDiagnostics();
+    }
     ui.status.textContent=networkMode?'CONNECTING TO CO-OP ROOM…':'Этап 1: первая группа Corp Sec. Укрытия блокируют пули.';window.__NEON_READY=true;requestAnimationFrame(loop);
   }
 }
