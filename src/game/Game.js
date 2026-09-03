@@ -61,6 +61,8 @@ export function startGame() {
         if (event.type === 'boss-started') ui.status.textContent = 'Этап 2: Warden-X ожил. Следи за красными зонами и паттернами пуль.';
         if (event.type === 'match-aborted') ui.status.textContent = 'MATCH ABORTED — WAITING FOR REPLACEMENT RAIDER';
         if (event.type === 'network-error') ui.status.textContent = `NETWORK ERROR — ${event.message}`;
+        if (event.type === 'network-reconnecting') ui.status.textContent = 'NETWORK INTERRUPTED — RECONNECTING…';
+        if (event.type === 'network-resumed') ui.status.textContent = 'CONNECTION RESTORED — RAID CONTINUES';
         if (event.type === 'network-disconnected') ui.status.textContent = 'NETWORK DISCONNECTED';
         const localEvent=!networkMode||event.slot==null||event.slot===session.getConnectionInfo().slot;
         if (event.type === 'reload-started'&&localEvent) { ui.status.textContent = 'RELOADING…'; tone(320,.05,'square',.012); }

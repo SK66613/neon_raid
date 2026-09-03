@@ -6,6 +6,7 @@ import {
   createInputAckMessage,
   createMatchAbortedMessage,
   createResumeTicketMessage,
+  createResumeMessage,
   createStateFrameMessage,
   createRosterMessage,
   createWelcomeMessage,
@@ -41,6 +42,15 @@ test('strict protocol-v2 resume envelopes and tickets validate without extra sta
   assert.equal(validateServerMessage(ticket).ok, true);
   assert.deepEqual(Object.keys(ticket).sort(), ['connectionId', 'graceMs', 'matchId', 'resumeToken', 'type', 'version']);
   assert.equal(validateServerMessage({ ...ticket, snapshot: {} }).ok, false);
+});
+
+test('createResumeMessage constructs only the strict validated protocol-v2 envelope', () => {
+  const token = 'c'.repeat(64);
+  const value = createResumeMessage('match', 'connection', token);
+  assert.deepEqual(value, { version: 2, type: 'resume', matchId: 'match', connectionId: 'connection', resumeToken: token });
+  assert.equal(validateResumeMessage(value).ok, true);
+  for (const args of [['', 'connection', token], ['match', '', token], ['match', 'connection', 'C'.repeat(64)],
+    ['match', 'connection', token.slice(1)], [null, 'connection', token]]) assert.throws(() => createResumeMessage(...args), TypeError);
 });
 
 test('only exact move, fire, dash, and grenade intent shapes validate', () => {

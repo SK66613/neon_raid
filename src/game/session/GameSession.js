@@ -3,6 +3,7 @@ export const SessionStatus = Object.freeze({
   CONNECTING: 'connecting',
   WAITING: 'waiting',
   READY: 'ready',
+  RECONNECTING: 'reconnecting',
   COMPLETE: 'complete',
   ERROR: 'error',
   CLOSED: 'closed',

@@ -15,8 +15,8 @@ Current multiplayer scope is the Warden-X boss encounter only. Multiplayer Stage
 | --- | --- |
 | Repository | `SK66613/neon_raid` |
 | Default branch | `main` |
-| Verified implementation baseline | `4ca95666fac598c2d4d3b0e76b20f25b3ceb0c75` |
-| Status date | 2026-09-02 |
+| Verified implementation baseline | `8432b28bd493995916c6075c31a759e7f7da7055` |
+| Status date | 2026-09-03 |
 | Production | <https://neon-raid.cyberian13.workers.dev/> |
 
 The baseline SHA identifies the code and production implementation state audited for this handoff. It is not a promise that `main` remains at that commit: documentation-only and later feature merges may advance the branch. Check the actual GitHub `main` ref whenever an exact current SHA matters.
@@ -98,7 +98,8 @@ The merge history records these architectural milestones:
 - Local movement and dash prediction, server reconciliation, soft correction, and hard snap for rejected dash-scale disagreement.
 - Remote Raider, boss, and projectile interpolation.
 - Same-origin HTTPS/WSS production deployment.
-- Active-disconnect abort; a replacement player can start a fresh match.
+- Reconnectable browser membership: a short live-page transport interruption can resume the same active match, logical member, and server simulation.
+- Active-disconnect abort after the reconnect grace expires; a replacement player can then start a fresh match.
 
 ### CI and automated validation coverage
 
@@ -109,7 +110,8 @@ The merge history records these architectural milestones:
 
 These are deferred scope, not necessarily defects:
 
-- No browser automatic reconnect/rejoin orchestration yet; server grace is capability-gated.
+- Resume credentials are memory-only: refresh/reload recovery is intentionally unavailable.
+- Durable Object/runtime loss still fails closed; there is no persisted active-match recovery.
 - No persistent player identity.
 - The active match remains in memory, with no active-match restore after Durable Object/runtime loss.
 - No Telegram authentication or Telegram `startapp` invite flow.
@@ -119,4 +121,4 @@ These are deferred scope, not necessarily defects:
 
 ## Server reconnect foundation (2026-09-02)
 
-`RaidRoom` now supports opt-in, authenticated, eight-second reconnectable membership for active matches. Membership reservations and the authoritative host are intentionally in memory only, so Durable Object runtime loss continues to fail closed rather than fabricate recovered simulation state. The current browser `NetworkGameSession` does **not** opt in, retain tickets, or automatically reconnect in this PR; ordinary production browser disconnect behavior remains unchanged until the follow-up browser work.
+`RaidRoom` now supports opt-in, authenticated, eight-second reconnectable membership for active matches. Membership reservations and the authoritative host are intentionally in memory only, so Durable Object runtime loss continues to fail closed rather than fabricate recovered simulation state. Browser `NetworkGameSession` now opts in with `reconnect=1`, privately retains the latest match ticket in memory, and uses bounded `resume=1` attempts to recover a live page within the advertised grace. No credential is placed in URLs, public connection information, events, or browser persistence. Reload recovery remains intentionally unsupported, and runtime loss still fails closed.

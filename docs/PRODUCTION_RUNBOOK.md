@@ -88,4 +88,14 @@ Record observed results rather than treating this checklist as proof that unperf
 
 ## Reconnect transport capability
 
-The room WebSocket route selectively forwards the internal non-secret flags `reconnect=1` (fresh opt-in connection) and `resume=1` (pending authenticated resume), never arbitrary query parameters or resume tokens. Supplying both flags, or malformed values, returns HTTP 400. The normal browser flow does not enable this capability yet, so operators must not claim browser automatic reconnect is available from this server-foundation change alone.
+The room WebSocket route selectively forwards the internal non-secret flags `reconnect=1` (fresh opt-in connection) and `resume=1` (pending authenticated resume), never arbitrary query parameters or resume tokens. Supplying both flags, or malformed values, returns HTTP 400. The browser flow enables fresh reconnectable membership. Credentials remain private and memory-only; refresh/reload is therefore not a valid reconnect test.
+
+
+## Manual production reconnect smoke (not yet verified)
+
+1. Start a live Warden-X match with Device A and Device B.
+2. Without refreshing either page, temporarily interrupt one device's network. Confirm its last authoritative scene remains visible with `NETWORK INTERRUPTED — RECONNECTING…`.
+3. Restore the network within the advertised grace. Expect the same match, Raider slot, logical connection, and continuing boss state, followed by `CONNECTION RESTORED — RAID CONTINUES`.
+4. Repeat, but leave the network unavailable beyond the grace. Expect recovery to stop and the survivor eventually to receive the existing match-aborted/waiting behavior.
+
+Do not use refresh/reload for this smoke: this PR deliberately keeps resume credentials in JavaScript memory only. Record actual observations; this procedure has not yet been manually verified in production.
