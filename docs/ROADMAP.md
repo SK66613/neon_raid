@@ -6,18 +6,16 @@ This is the current engineering order, not a promise to implement every possible
 
 **FIRST ONLINE PLAYABLE — ACHIEVED.** Two real devices can use a public same-origin Cloudflare deployment to create/join one room, enter the shared two-Raider Warden-X encounter, move, and shoot under server authority. This was manually observed on 2026-09-02.
 
-## Next: browser resume and automatic reconnect
+## Next engineering order
 
-The immediate next step is the PR #12 browser integration in `NetworkGameSession`:
+Browser resume is implemented. The next work order is:
 
-- Opt into the server transport with `reconnect=1`.
-- Retain the server-issued ticket privately (never in the invite URL or browser persistence).
-- Retry WSS only during the advertised grace period.
-- Open `resume=1` and send the authenticated resume envelope.
-- Reset presentation/prediction safely for the new WebSocket sequence domain.
-- Preserve the same room, match, slot, and canonical simulation when resume succeeds.
+1. Production validation of browser reconnect.
+2. Multiplayer diagnostics and observability.
+3. Evaluate active-match checkpoint/recovery only if production evidence shows it is needed.
+4. Telegram Mini App identity and invite layer.
 
-The server-side reconnectable membership foundation is complete. Browser automatic reconnect, reconnect UI, and reload recovery are not part of that foundation.
+Reload recovery remains outside the browser reconnect scope because tickets are memory-only.
 
 ## Telegram
 

@@ -60,6 +60,8 @@ The normal lifecycle is:
 
 ```text
 WAITING → READY → COMPLETE
+READY → RECONNECTING → READY
+RECONNECTING → ERROR (when recovery fails)
 ```
 
 An active disconnect currently follows:
@@ -88,3 +90,10 @@ Reconnect is an additive, capability-gated protocol-v2 contract; it does not cha
 An unexpected active disconnect reserves the same room slot and keeps the authoritative match ticking while neutral move and fire intents are applied. An unauthenticated `resume=1` transport must first send the exact `resume` envelope. Successful authentication before the deadline preserves `roomId`, `matchId`, `connectionId`, slot, and simulation state, rotates the secret, and sends an immediate non-advancing synchronization frame. Input `seq` is per WebSocket, so the resumed connection resets to `-1` and may begin at zero; the survivor's sequence is unchanged. Expiry aborts with `player-left`. Runtime loss still fails closed because hosts and reservations remain in memory.
 
 The public invite remains `?coop=join&room=<roomId>`; transport flags and credentials do not belong in it.
+
+
+## Browser reconnect lifecycle
+
+`NetworkGameSession` opts fresh create and join transports into reconnectable membership. It owns the latest server ticket privately and in memory only. On an eligible active-match interruption it freezes the last authoritative presentation, allows only persistent desired move/fire state to change, and runs at most one resume WebSocket attempt at a time inside the original server-advertised deadline. No gameplay is sent before the authenticated synchronization frame.
+
+The synchronization frame rebases presentation directly to server truth. It normally advances the tick, but the single authenticated resume barrier may replace a same-match frame whose tick equals the last observed tick; lower ticks remain invalid and ordinary frames remain strictly increasing. A resumed WebSocket starts a new client sequence domain at zero, clears ACK/prediction history, and replays the latest move and fire intents once if the local Raider is alive. Dash and grenade edges are never replayed. Rotated credentials replace earlier tickets and support another interruption in the same match.

@@ -47,6 +47,12 @@ export function validateResumeMessage(message) {
   return valid ? { ok: true, value: message } : { ok: false, code: 'resume-rejected' };
 }
 
+export function createResumeMessage(matchId, connectionId, resumeToken) {
+  const message = { version: MULTIPLAYER_PROTOCOL_VERSION, type: 'resume', matchId, connectionId, resumeToken };
+  if (!validateResumeMessage(message).ok) throw new TypeError('invalid resume message');
+  return message;
+}
+
 export const createWelcomeMessage = (roomId, connectionId, slot, capacity) => ({
   version: MULTIPLAYER_PROTOCOL_VERSION, type: 'welcome', roomId, connectionId, slot, capacity,
 });
