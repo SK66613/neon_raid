@@ -96,10 +96,12 @@ Production validation after PR #12 observed that a room could be created and joi
 
 After PR #13 deployed, a completely new room was manually verified on PC and phone on 2026-09-03: the Warden-X match started and gameplay was visible. This did not reproduce the earlier WAITING observation and does not prove its cause. Browser reconnect opt-in has now been re-enabled at the public co-op composition boundary. Production reconnect has not yet been manually verified after this enablement.
 
+After PR #15 enabled public reconnect, a PC-and-phone test interrupted and restored phone Wi-Fi during a fresh active Warden-X match. The phone froze and ended at `NETWORK DISCONNECTED`; refresh did not restore the intentionally memory-only credential. The delayed server-departure ordering is now covered by authenticated stale-transport takeover, but production reconnect remains **required and unverified** until the owner repeats this smoke after deployment.
+
 
 ## Manual production reconnect smoke — REQUIRED POST-MERGE VALIDATION
 
-1. Start a live Warden-X match with Device A and Device B.
+1. Create a fresh room and start a live Warden-X match with Device A and Device B.
 2. **A. First reconnect:** without refreshing either page, temporarily interrupt one device's network. Confirm its last authoritative scene remains visible with `NETWORK INTERRUPTED — RECONNECTING…`; restore the network within the advertised grace and expect the same match, Raider slot, logical connection, and continuing boss state, followed by `CONNECTION RESTORED — RAID CONTINUES`.
 3. **B. Normal gameplay after reconnect:** verify ordinary movement, fire, authoritative frames, and shared boss progression continue after the first reconnect.
 4. **C. Second reconnect using rotated credential behavior:** interrupt and restore the same device again within the grace; expect a second successful resume using the server-rotated credential behavior, without exposing the credential.

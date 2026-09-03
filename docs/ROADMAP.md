@@ -8,10 +8,10 @@ This is the current engineering order, not a promise to implement every possible
 
 ## Next engineering order
 
-Browser resume is implemented and public co-op explicitly opts into it. Fresh-room two-device startup was manually reverified after PR #13, and the deterministic cross-layer harness passes without establishing the cause of the earlier observation. Production reconnect remains to be manually verified after enablement. The next work order is:
+Browser resume is implemented and public co-op explicitly opts into it. The first production reconnect test after PR #15 failed at `NETWORK DISCONNECTED`; authenticated stale-transport takeover now covers the reproduced delayed server-departure race. Production reconnect remains unverified pending an owner retest. The next work order is:
 
 1. Run a production two-device reconnect smoke covering first resume, normal gameplay after resume, second resume with the rotated credential, and failure beyond eight seconds.
-2. Fix any production-only issue if one is observed.
+2. Fix any remaining production-only reconnect issue if one is observed.
 3. Add multiplayer diagnostics and observability.
 4. Add the Telegram Mini App identity and invite layer.
 

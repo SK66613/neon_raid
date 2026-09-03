@@ -111,22 +111,23 @@ test('active session resumes twice with rotated credentials and ordinary frames 
   await schedulerA.advance(0, harness.queue);
 });
 
-test('resume-unavailable race retries after the real room records departure', async t => {
+test('client resume arrives before server departure and takes over the stale transport twice', async t => {
   const harness = createInMemoryMultiplayerHarness(); t.after(() => harness.restore());
-  const { a, roomId, schedulerA, socketA } = await connectPair(harness, true);
+  const { a, b, roomId, socketA } = await connectPair(harness, true);
   a.drainEvents(); const before = a.getConnectionInfo(), room = harness.room(roomId), host = room.host;
   const loss = await harness.lose(socketA, { serverFirst: false });
-  const failed = harness.sockets().at(-1);
-  assert.equal(a.getStatus(), SessionStatus.RECONNECTING);
-  assert.equal(harness.trace.find(item => item.event === 'upgrade-failed' && item.connection === failed.connection).status, 409);
-  assert.equal(room.reservations.size, 0);
-  await loss.depart(); assert.equal(room.reservations.size, 1);
-  await schedulerA.advance(250, harness.queue);
   const resumed = harness.sockets().at(-1);
-  assert.notEqual(resumed, failed); assert.equal(new URL(resumed.url).search, '?resume=1');
+  assert.equal(new URL(resumed.url).search, '?resume=1');
   assert.equal(clientMessages(harness, resumed.connection, 'resume').length, 1);
   assert.equal(a.getStatus(), SessionStatus.READY); assert.equal(room.host, host); assert.deepEqual(identity(a.getConnectionInfo()), identity(before));
+  assert.equal(socketA.server.deserializeAttachment().socketType, 'retired-member');assert.equal(room.reservations.size, 0);
+  await loss.depart();assert.equal(room.host,host);assert.equal(room.reservations.size,0);assert.equal(room.memberSockets().includes(resumed.server),true);
+  room.webSocketClose(socketA.server,1006,'late',false);assert.equal(room.host,host);assert.equal(room.reservations.size,0);
+  harness.serverScheduler.runTicks(2);await harness.flush();assert.equal(a.getStatus(),SessionStatus.READY);assert.equal(b.getStatus(),SessionStatus.READY);
   const events = a.drainEvents(); assert.equal(events.filter(item => item.type === 'network-reconnecting').length, 1);
   assert.equal(events.filter(item => item.type === 'network-resumed').length, 1);
-  assert.deepEqual(networkErrors(events), []);
+  assert.deepEqual(networkErrors(events), []);assert.deepEqual(networkErrors(b.drainEvents()),[]);
+  const firstCredential=clientMessages(harness,resumed.connection,'resume')[0].data.resumeToken;
+  await harness.lose(resumed,{serverFirst:true});const resumedAgain=harness.sockets().at(-1),secondCredential=clientMessages(harness,resumedAgain.connection,'resume')[0].data.resumeToken;
+  assert.notEqual(secondCredential,firstCredential);assert.equal(a.getStatus(),SessionStatus.READY);assert.equal(room.host,host);assert.deepEqual(identity(a.getConnectionInfo()),identity(before));assert.equal(room.reservations.size,0);
 });

@@ -33,7 +33,7 @@ export class RaidRoom {
   openSockets(excludedSocket = null) {
     return this.ctx.getWebSockets().filter(socket => socket !== excludedSocket && isOpenSocket(socket));
   }
-  memberSockets(excludedSocket = null) { return this.openSockets(excludedSocket).filter(socket => socket.deserializeAttachment()?.socketType !== 'pending-resume'); }
+  memberSockets(excludedSocket = null) { return this.openSockets(excludedSocket).filter(socket => !['pending-resume', 'retired-member'].includes(socket.deserializeAttachment()?.socketType)); }
 
   safeSend(socket, message) {
     if (!isOpenSocket(socket)) return false;
@@ -59,7 +59,9 @@ export class RaidRoom {
     this.roomId = url.searchParams.get('roomId');
     if (pendingResume) {
       const matchId = this.host?.getMatchId();
-      const resumable = matchId && [...this.reservations.values()].some(reservation => reservation.matchId === matchId);
+      const resumable = matchId && ([...this.reservations.values()].some(reservation => reservation.matchId === matchId)
+        || this.memberSockets().some(socket => { const member = socket.deserializeAttachment(); return member?.matchId === matchId
+          && member.matchState === 'active' && member.reconnectCapable === true && Boolean(member.resumeToken); }));
       if (!resumable) return Response.json({ error: 'resume-unavailable' }, { status: 409 });
       if (this.pendingResumeAuth.size >= ROOM_CAPACITY) return Response.json({ error: 'too-many-resume-attempts' }, { status: 429 });
       const pair = new WebSocketPair(); const [client, server] = Object.values(pair);
@@ -117,6 +119,7 @@ export class RaidRoom {
     let message; try { message = JSON.parse(payload); } catch { return this.sendError(socket, 'invalid-json', 'Message must be valid JSON.'); }
     const initialAttachment = socket.deserializeAttachment();
     if (initialAttachment?.socketType === 'pending-resume') return this.handleResume(socket, message);
+    if (initialAttachment?.socketType === 'retired-member') return;
     const validation = validateInputMessage(message); if (!validation.ok) return this.sendError(socket, validation.code, 'Message was rejected.');
     const attachment = socket.deserializeAttachment();
     if (attachment?.matchState === 'active' && !this.host) {
@@ -140,6 +143,7 @@ export class RaidRoom {
   handleDeparture(socket, intentional = false) {
     const attachment = socket.deserializeAttachment();
     if (attachment?.socketType === 'pending-resume') { this.retirePendingResume(socket); return; }
+    if (attachment?.socketType === 'retired-member') return;
     if (attachment?.matchState === 'active' && attachment.reconnectCapable && attachment.resumeToken && !intentional) this.reserveDeparture(attachment);
     else if (attachment?.matchState === 'active') this.abortMatch('player-left', socket);
     else if (attachment?.matchState === 'complete') { this.stopTimer(); this.host = null; this.markWaiting(socket); }
@@ -156,19 +160,33 @@ export class RaidRoom {
   handleResume(socket, message) {
     const validation = validateResumeMessage(message);
     const reservation = validation.ok ? this.reservations.get(message.connectionId) : null;
-    const valid = reservation && reservation.matchId === message.matchId && reservation.resumeToken === message.resumeToken
+    const validReservation = reservation && reservation.matchId === message.matchId && reservation.resumeToken === message.resumeToken
       && this.reservations.get(reservation.connectionId) === reservation
       && reservation.deadline > this.now() && this.host?.getMatchId() === reservation.matchId;
-    if (!valid) {
+    const liveSocket = !validReservation && validation.ok ? this.memberSockets().find(candidate => {
+      const member = candidate.deserializeAttachment();
+      return member?.connectionId === message.connectionId && member.matchId === message.matchId
+        && member.resumeToken === message.resumeToken && member.reconnectCapable === true
+        && member.matchState === 'active' && member.matchId === this.host?.getMatchId();
+    }) : null;
+    if (!validReservation && !liveSocket) {
       this.safeSend(socket, createErrorMessage('resume-rejected', 'Resume was rejected.'));
       return this.retirePendingResume(socket, 1008, 'Resume rejected');
     }
     this.clearPendingResumeTracking(socket);
-    this.scheduler.clearTimeout(reservation.timeout); this.reservations.delete(reservation.connectionId);
+    const membership = validReservation ? reservation : liveSocket.deserializeAttachment();
+    if (validReservation) { this.scheduler.clearTimeout(reservation.timeout); this.reservations.delete(reservation.connectionId); }
+    else {
+      this.host.applyCommand(membership.slot, { type: 'move', x: 0, y: 0 });
+      this.host.applyCommand(membership.slot, { type: 'fire', active: false });
+      liveSocket.serializeAttachment({ socketType: 'retired-member', connectionId: null, slot: null, lastInputSeq: -1,
+        matchId: null, matchState: 'retired', reconnectCapable: false, resumeToken: null });
+      try { liveSocket.close(1000, 'Session replaced'); } catch {}
+    }
     const resumeToken = this.createResumeToken();
-    socket.serializeAttachment({ socketType: 'member', connectionId: reservation.connectionId, slot: reservation.slot, lastInputSeq: -1, matchId: reservation.matchId, matchState: 'active', reconnectCapable: true, resumeToken });
-    this.safeSend(socket, createWelcomeMessage(this.roomId, reservation.connectionId, reservation.slot, ROOM_CAPACITY));
-    this.safeSend(socket, createResumeTicketMessage(reservation.matchId, reservation.connectionId, resumeToken, RECONNECT_GRACE_MS));
+    socket.serializeAttachment({ socketType: 'member', connectionId: membership.connectionId, slot: membership.slot, lastInputSeq: -1, matchId: membership.matchId, matchState: 'active', reconnectCapable: true, resumeToken });
+    this.safeSend(socket, createWelcomeMessage(this.roomId, membership.connectionId, membership.slot, ROOM_CAPACITY));
+    this.safeSend(socket, createResumeTicketMessage(membership.matchId, membership.connectionId, resumeToken, RECONNECT_GRACE_MS));
     this.safeSend(socket, this.host.currentFrame()); this.broadcastRoster();
   }
   expireReservation(connectionId, matchId) {
