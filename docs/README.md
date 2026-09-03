@@ -1,7 +1,7 @@
 # NEON RAID Engineering Documentation
 
 - **Documentation status:** 2026-09-03
-- **Audited implementation baseline:** `77e691779ef45e3b2234f74514f7f1b6d8677bdb`
+- **Audited implementation baseline:** `9df9e6287605c62288e9101472be9d26fa24691e`
 - **Production origin:** <https://neon-raid.cyberian13.workers.dev/>
 
 The baseline SHA identifies the code and production implementation state documented by this handoff. The live `main` branch may advance after this documentation PR or later feature merges; check the actual GitHub `main` ref whenever an exact current SHA matters.

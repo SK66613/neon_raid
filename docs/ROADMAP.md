@@ -8,13 +8,12 @@ This is the current engineering order, not a promise to implement every possible
 
 ## Next engineering order
 
-Browser resume is implemented but temporarily disabled by default. Fresh-room two-device startup was manually reverified after PR #13, and the deterministic cross-layer harness passes without establishing the cause of the earlier observation. The next work order is:
+Browser resume is implemented and public co-op explicitly opts into it. Fresh-room two-device startup was manually reverified after PR #13, and the deterministic cross-layer harness passes without establishing the cause of the earlier observation. Production reconnect remains to be manually verified after enablement. The next work order is:
 
-1. Independently audit and merge the cross-layer harness.
-2. Re-enable browser reconnect in one tiny focused PR.
-3. Run a production two-device reconnect smoke covering first resume, normal gameplay after resume, second resume with the rotated credential, and failure beyond eight seconds.
-4. Add multiplayer diagnostics and observability.
-5. Add the Telegram layer.
+1. Run a production two-device reconnect smoke covering first resume, normal gameplay after resume, second resume with the rotated credential, and failure beyond eight seconds.
+2. Fix any production-only issue if one is observed.
+3. Add multiplayer diagnostics and observability.
+4. Add the Telegram Mini App identity and invite layer.
 
 Do not proceed to Telegram until this order is complete and reliable browser multiplayer is re-established.
 
