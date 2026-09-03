@@ -8,7 +8,7 @@ This is the current engineering order, not a promise to implement every possible
 
 ## Next engineering order
 
-Browser resume is implemented and public co-op explicitly opts into it. The first production reconnect test after PR #15 failed at `NETWORK DISCONNECTED`; authenticated stale-transport takeover now covers the reproduced delayed server-departure race. Production reconnect remains unverified pending an owner retest. The next work order is:
+Browser resume is implemented and public co-op explicitly opts into it. PR #16 covers client-first stale-transport takeover, and the authoritative-frame watchdog covers the reproduced server-first OPEN-but-stalled ordering. Real-phone reconnect has still repeatedly ended at `NETWORK DISCONNECTED` despite one observed success, so production reconnect remains unverified pending an owner retest. The next work order is:
 
 1. Run a production two-device reconnect smoke covering first resume, normal gameplay after resume, second resume with the rotated credential, and failure beyond eight seconds.
 2. Fix any remaining production-only reconnect issue if one is observed.

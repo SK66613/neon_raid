@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createNetworkGameSession } from '../src/game/session/NetworkGameSession.js';
+import { AUTHORITATIVE_FRAME_STALL_MS, createNetworkGameSession } from '../src/game/session/NetworkGameSession.js';
 import { SessionStatus } from '../src/game/session/GameSession.js';
 import { createMultiplayerBossState } from '../src/game/multiplayer/createMultiplayerBossState.js';
 import { PLAYER_CONFIG } from '../src/game/multiplayer/config.js';
@@ -373,6 +373,61 @@ test('active interruption authenticates privately, freezes, and accepts a same-t
     assert.equal(JSON.stringify(publicValue).includes(token), false);
     assert.equal(JSON.stringify(publicValue).includes(rotated), false);
   }
+});
+
+test('an OPEN active transport stall resumes with rotated credentials and remains reusable', async () => {
+  const scheduler = new FakeScheduler();
+  const { session, socket } = await setup({ scheduler, reconnectCapable: true });
+  const firstToken = '9'.repeat(64), rotatedToken = '8'.repeat(64);
+  socket.emit('message', message('resume-ticket', {
+    matchId: 'stalled', connectionId: 'server-choice', resumeToken: firstToken, graceMs: 8000,
+  }));
+  socket.emit('message', frame('stalled', 100));
+  scheduler.advance(AUTHORITATIVE_FRAME_STALL_MS - 1);
+  assert.equal(socket.readyState, 1);
+  assert.equal(session.getStatus(), SessionStatus.READY);
+  assert.equal(FakeSocket.instances.length, 1);
+  assert.deepEqual(session.drainEvents(), []);
+  scheduler.advance(1);
+  assert.deepEqual(socket.closeArgs, [1000, 'Authoritative frame stalled']);
+  assert.equal(session.getStatus(), SessionStatus.RECONNECTING);
+  assert.equal(FakeSocket.instances.length, 2);
+  assert.deepEqual(session.drainEvents(), [{ type: 'network-reconnecting', graceMs: 8000 }]);
+
+  const resume = FakeSocket.instances[1]; assert.equal(new URL(resume.url).search, '?resume=1'); resume.emit('open');
+  assert.equal(resume.sent[0].resumeToken, firstToken);
+  resume.emit('message', message('welcome', { roomId, connectionId: 'server-choice', slot: 2, capacity: 2 }));
+  resume.emit('message', message('resume-ticket', {
+    matchId: 'stalled', connectionId: 'server-choice', resumeToken: rotatedToken, graceMs: 8000,
+  }));
+  resume.emit('message', frame('stalled', 100));
+  resume.emit('message', frame('stalled', 101)); resume.emit('message', frame('stalled', 102));
+  assert.equal(session.getStatus(), SessionStatus.READY);
+  assert.deepEqual(session.drainEvents(), [{ type: 'network-resumed' }]);
+
+  resume.emit('close', {});
+  const secondResume = FakeSocket.instances[2]; secondResume.emit('open');
+  assert.equal(secondResume.sent[0].resumeToken, rotatedToken);
+  assert.equal(session.getStatus(), SessionStatus.RECONNECTING);
+  assert.deepEqual(session.drainEvents(), [{ type: 'network-reconnecting', graceMs: 8000 }]);
+});
+
+test('accepted active frames continuously refresh the liveness watchdog', async () => {
+  const scheduler = new FakeScheduler();
+  const { session, socket } = await setup({ scheduler, reconnectCapable: true });
+  socket.emit('message', message('resume-ticket', {
+    matchId: 'healthy', connectionId: 'server-choice', resumeToken: '7'.repeat(64), graceMs: 8000,
+  }));
+  socket.emit('message', frame('healthy', 100));
+  for (const tick of [101, 102, 103]) {
+    scheduler.advance(AUTHORITATIVE_FRAME_STALL_MS - 1);
+    socket.emit('message', frame('healthy', tick));
+  }
+  scheduler.advance(AUTHORITATIVE_FRAME_STALL_MS - 1);
+  assert.equal(session.getStatus(), SessionStatus.READY);
+  assert.equal(FakeSocket.instances.length, 1);
+  assert.equal(socket.closeArgs, undefined);
+  assert.deepEqual(session.drainEvents(), []);
 });
 
 test('resume attempts are bounded, race-safe, and expire once at the absolute deadline', async () => {

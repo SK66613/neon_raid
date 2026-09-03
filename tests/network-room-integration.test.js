@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createNetworkGameSession } from '../src/game/session/NetworkGameSession.js';
+import { AUTHORITATIVE_FRAME_STALL_MS, createNetworkGameSession } from '../src/game/session/NetworkGameSession.js';
 import { SessionStatus } from '../src/game/session/GameSession.js';
 import { createInMemoryMultiplayerHarness } from './helpers/in-memory-multiplayer-harness.js';
 
@@ -130,4 +130,44 @@ test('client resume arrives before server departure and takes over the stale tra
   const firstCredential=clientMessages(harness,resumed.connection,'resume')[0].data.resumeToken;
   await harness.lose(resumed,{serverFirst:true});const resumedAgain=harness.sockets().at(-1),secondCredential=clientMessages(harness,resumedAgain.connection,'resume')[0].data.resumeToken;
   assert.notEqual(secondCredential,firstCredential);assert.equal(a.getStatus(),SessionStatus.READY);assert.equal(room.host,host);assert.deepEqual(identity(a.getConnectionInfo()),identity(before));assert.equal(room.reservations.size,0);
+});
+
+test('server-first departure resumes when the old browser transport stays OPEN but frames stall', async t => {
+  const harness = createInMemoryMultiplayerHarness(); t.after(() => harness.restore());
+  const { a, b, roomId, schedulerA, socketA } = await connectPair(harness, true);
+  a.drainEvents(); b.drainEvents();
+  const before = a.getConnectionInfo(), room = harness.room(roomId), host = room.host;
+  const initialTicket = serverMessages(harness, socketA.connection, 'resume-ticket').at(-1).data.resumeToken;
+
+  harness.serverDepartWithoutBrowserNotification(socketA);
+  assert.equal(socketA.readyState, 1);
+  assert.equal(a.getStatus(), SessionStatus.READY);
+  assert.equal(room.reservations.size, 1);
+  await schedulerA.advance(AUTHORITATIVE_FRAME_STALL_MS - 1, harness.queue);
+  assert.equal(a.getStatus(), SessionStatus.READY);
+  assert.equal(harness.sockets().length, 2);
+
+  await schedulerA.advance(1, harness.queue);
+  const resumed = harness.sockets().at(-1), after = a.getConnectionInfo();
+  assert.equal(new URL(resumed.url).search, '?resume=1');
+  assert.equal(clientMessages(harness, resumed.connection, 'resume').length, 1);
+  assert.equal(clientMessages(harness, resumed.connection, 'resume')[0].data.resumeToken, initialTicket);
+  assert.deepEqual(identity(after), identity(before));
+  assert.equal(after.roomId, roomId); assert.equal(room.host, host); assert.equal(room.reservations.size, 0);
+  const rotatedTicket = serverMessages(harness, resumed.connection, 'resume-ticket').at(-1).data.resumeToken;
+  assert.notEqual(rotatedTicket, initialTicket);
+  assert.equal(a.getStatus(), SessionStatus.READY); assert.equal(b.getStatus(), SessionStatus.READY);
+  let events = a.drainEvents();
+  assert.equal(events.filter(item => item.type === 'network-reconnecting').length, 1);
+  assert.equal(events.filter(item => item.type === 'network-resumed').length, 1);
+  assert.deepEqual(networkErrors(events), []); assert.deepEqual(networkErrors(b.drainEvents()), []);
+
+  socketA.emit('error', {}); socketA.emit('close', { code: 1006, wasClean: false });
+  assert.equal(a.getStatus(), SessionStatus.READY); assert.equal(room.host, host);
+  harness.serverScheduler.runTicks(2); await harness.flush();
+  assert.equal(a.getStatus(), SessionStatus.READY); assert.equal(b.getStatus(), SessionStatus.READY);
+  assert.equal(a.getConnectionInfo().lastServerTick, 2); assert.equal(b.getConnectionInfo().lastServerTick, 2);
+  events = a.drainEvents(); assert.deepEqual(networkErrors(events), []);
+  assert.equal(events.some(item => item.type === 'match-aborted'), false);
+  assert.deepEqual(networkErrors(b.drainEvents()), []);
 });
