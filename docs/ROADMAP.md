@@ -8,13 +8,13 @@ This is the current engineering order, not a promise to implement every possible
 
 ## Next engineering order
 
-Browser resume is implemented but temporarily disabled by default after the 2026-09-03 production startup regression. The next work order is:
+Browser resume is implemented but temporarily disabled by default. Fresh-room two-device startup was manually reverified after PR #13, and the deterministic cross-layer harness passes without establishing the cause of the earlier observation. The next work order is:
 
-1. Restore and manually verify two-device production startup.
-2. Build a real cross-layer `RaidRoom` ↔ `NetworkGameSession` regression harness.
-3. Identify and fix the reconnect-capable startup failure without assuming a root cause.
-4. Re-enable browser reconnect only after production startup is proven.
-5. Add multiplayer diagnostics and observability.
+1. Independently audit and merge the cross-layer harness.
+2. Re-enable browser reconnect in one tiny focused PR.
+3. Run a production two-device reconnect smoke covering first resume, normal gameplay after resume, second resume with the rotated credential, and failure beyond eight seconds.
+4. Add multiplayer diagnostics and observability.
+5. Add the Telegram layer.
 
 Do not proceed to Telegram until this order is complete and reliable browser multiplayer is re-established.
 

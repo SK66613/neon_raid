@@ -57,6 +57,8 @@ jobs:
           node --check tests/player-kinematics.test.js
           node --check tests/network-session.test.js
           node --check tests/network-view.test.js
+          node --check tests/helpers/in-memory-multiplayer-harness.js
+          node --check tests/network-room-integration.test.js
           node --check scripts/verify-assets.mjs
           node --check scripts/verify-build.mjs
           node --check scripts/verify-deployment-config.mjs
@@ -75,6 +77,8 @@ jobs:
         run: npm run test:authoritative-room
       - name: Test authoritative browser network session
         run: npm run test:network-session
+      - name: Test cross-layer multiplayer session
+        run: npm run test:cross-layer
       - name: Build client
         run: npm run build
       - name: Validate production output

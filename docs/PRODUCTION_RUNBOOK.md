@@ -94,6 +94,8 @@ The room WebSocket route selectively forwards the internal non-secret flags `rec
 
 Production validation after PR #12 observed that a room could be created and joined and membership could reach two Raiders, but the playable Warden-X match did not start/load. The exact runtime cause is not yet proven. The emergency mitigation disables the browser's default reconnect capability, restoring the previously verified ordinary-member startup path while leaving the server foundation and browser reconnect implementation intact for investigation behind cross-layer coverage.
 
+After PR #13 deployed, a completely new room was manually verified on PC and phone on 2026-09-03: the Warden-X match started and gameplay was visible. This did not reproduce the earlier WAITING observation and does not prove its cause. Interrupting Wi-Fi on the phone currently produces `NETWORK DISCONNECTED`, which is expected because browser reconnect opt-in remains disabled. Production reconnect smoke is deferred until that opt-in is re-enabled.
+
 
 ## Manual production reconnect smoke (deferred while browser opt-in is disabled)
 

@@ -1,12 +1,12 @@
 # NEON RAID Engineering Documentation
 
 - **Documentation status:** 2026-09-03
-- **Audited implementation baseline:** `8432b28bd493995916c6075c31a759e7f7da7055`
+- **Audited implementation baseline:** `77e691779ef45e3b2234f74514f7f1b6d8677bdb`
 - **Production origin:** <https://neon-raid.cyberian13.workers.dev/>
 
 The baseline SHA identifies the code and production implementation state documented by this handoff. The live `main` branch may advance after this documentation PR or later feature merges; check the actual GitHub `main` ref whenever an exact current SHA matters.
 
-NEON RAID has reached its first online-playable milestone. On 2026-09-02, two-device Internet co-op was manually verified against the public production origin; this is a dated production smoke observation, not an automated end-to-end test.
+NEON RAID has reached its first online-playable milestone. On 2026-09-03, fresh-room two-device Internet co-op was manually reverified against the public production origin after PR #13; this is a dated production smoke observation, not an automated end-to-end test.
 
 ## Reading order
 
