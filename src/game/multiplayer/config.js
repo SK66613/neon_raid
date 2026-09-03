@@ -13,11 +13,18 @@ export const PLAYER_CONFIG = Object.freeze({
 });
 
 export const BOSS_CONFIG = Object.freeze({
-  initialAttackDelay: 1.20,
+  initialAttackDelay: 3.00,
   attackInterval: Object.freeze({
-    1: 1.20,
-    2: 1.00,
-    3: 0.82,
+    1: 3.50,
+    2: 3.00,
+    3: 2.50,
+  }),
+  projectileCount: Object.freeze({
+    phase1Burst: 3,
+    phase2Burst: 4,
+    phase2Radial: 6,
+    phase3Burst: 5,
+    phase3Radial: 8,
   }),
 });
 

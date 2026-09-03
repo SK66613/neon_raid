@@ -212,9 +212,9 @@ export class MultiplayerBossSimulation {
   #bossPattern() {
     const boss = this.#state.boss, next = boss.hp < 400 ? 3 : boss.hp < 800 ? 2 : 1;
     if (next !== boss.phase) { boss.phase = next; this.#emit('boss-phase-changed', { phase: next }); }
-    if (boss.phase === 1) { this.#bossBurst(5, 0.72, 165); if (this.#rng.next() < 0.65) this.#createDanger(DANGER_CONFIG[1][0]); }
-    else if (boss.phase === 2) { this.#rng.next() < 0.5 ? this.#bossBurst(7, 0.98, 178) : this.#bossRadial(11, 136); this.#createDanger(DANGER_CONFIG[2][0]); }
-    else { this.#rng.next() < 0.48 ? this.#bossRadial(15, 146) : this.#bossBurst(9, 1.22, 188); for (const config of DANGER_CONFIG[3]) this.#createDanger(config); }
+    if (boss.phase === 1) { this.#bossBurst(BOSS_CONFIG.projectileCount.phase1Burst, 0.72, 165); if (this.#rng.next() < 0.65) this.#createDanger(DANGER_CONFIG[1][0]); }
+    else if (boss.phase === 2) { this.#rng.next() < 0.5 ? this.#bossBurst(BOSS_CONFIG.projectileCount.phase2Burst, 0.98, 178) : this.#bossRadial(BOSS_CONFIG.projectileCount.phase2Radial, 136); this.#createDanger(DANGER_CONFIG[2][0]); }
+    else { this.#rng.next() < 0.48 ? this.#bossRadial(BOSS_CONFIG.projectileCount.phase3Radial, 146) : this.#bossBurst(BOSS_CONFIG.projectileCount.phase3Burst, 1.22, 188); for (const config of DANGER_CONFIG[3]) this.#createDanger(config); }
     boss.attackTimer = BOSS_CONFIG.attackInterval[boss.phase];
   }
   #bossBurst(count, spread, speed) {
