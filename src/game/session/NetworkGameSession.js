@@ -45,10 +45,12 @@ export class NetworkGameSession extends GameSession {
   #retryTimer = null;
   #attemptTimer = null;
   #resumeWelcome = false;
+  #reconnectCapable = false;
 
-  constructor({ roomId = null, scheduler = defaultScheduler } = {}) {
+  constructor({ roomId = null, scheduler = defaultScheduler, reconnectCapable = false } = {}) {
     super();
     this.#scheduler = scheduler;
+    this.#reconnectCapable = reconnectCapable;
     this.#info = { roomId, connectionId: null, slot: null, capacity: null, matchId: null,
       peerCount: 0, lastServerTick: null, lastAckSeq: null };
   }
@@ -73,7 +75,7 @@ export class NetworkGameSession extends GameSession {
     if (typeof WebSocketImpl !== 'function') throw this.#fail('WebSocket is unavailable.');
     this.#WebSocketImpl = WebSocketImpl; this.#origin = origin;
     const url = new URL(`/api/rooms/${encodeURIComponent(roomId)}/ws`, origin);
-    url.searchParams.set('reconnect', '1');
+    if (this.#reconnectCapable) url.searchParams.set('reconnect', '1');
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     try { this.#socket = new WebSocketImpl(url.href); } catch { throw this.#fail('WebSocket connection failed.'); }
     this.#wireSocket(this.#socket, false);

@@ -88,10 +88,14 @@ Record observed results rather than treating this checklist as proof that unperf
 
 ## Reconnect transport capability
 
-The room WebSocket route selectively forwards the internal non-secret flags `reconnect=1` (fresh opt-in connection) and `resume=1` (pending authenticated resume), never arbitrary query parameters or resume tokens. Supplying both flags, or malformed values, returns HTTP 400. The browser flow enables fresh reconnectable membership. Credentials remain private and memory-only; refresh/reload is therefore not a valid reconnect test.
+The room WebSocket route selectively forwards the internal non-secret flags `reconnect=1` (fresh opt-in connection) and `resume=1` (pending authenticated resume), never arbitrary query parameters or resume tokens. Supplying both flags, or malformed values, returns HTTP 400. This server capability remains available, but the production browser flow temporarily omits `reconnect=1` and therefore uses ordinary immediate-disconnect membership. Credentials remain private and memory-only when the capability is exercised in tests.
+
+### 2026-09-03 startup incident
+
+Production validation after PR #12 observed that a room could be created and joined and membership could reach two Raiders, but the playable Warden-X match did not start/load. The exact runtime cause is not yet proven. The emergency mitigation disables the browser's default reconnect capability, restoring the previously verified ordinary-member startup path while leaving the server foundation and browser reconnect implementation intact for investigation behind cross-layer coverage.
 
 
-## Manual production reconnect smoke (not yet verified)
+## Manual production reconnect smoke (deferred while browser opt-in is disabled)
 
 1. Start a live Warden-X match with Device A and Device B.
 2. Without refreshing either page, temporarily interrupt one device's network. Confirm its last authoritative scene remains visible with `NETWORK INTERRUPTED — RECONNECTING…`.

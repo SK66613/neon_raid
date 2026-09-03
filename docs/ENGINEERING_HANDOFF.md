@@ -15,7 +15,7 @@ Current multiplayer scope is the Warden-X boss encounter only. Multiplayer Stage
 | --- | --- |
 | Repository | `SK66613/neon_raid` |
 | Default branch | `main` |
-| Verified implementation baseline | `8432b28bd493995916c6075c31a759e7f7da7055` |
+| Verified implementation baseline | `e43de25e7330e9b82894db49577286f5931d6ac5` |
 | Status date | 2026-09-03 |
 | Production | <https://neon-raid.cyberian13.workers.dev/> |
 
@@ -98,8 +98,8 @@ The merge history records these architectural milestones:
 - Local movement and dash prediction, server reconciliation, soft correction, and hard snap for rejected dash-scale disagreement.
 - Remote Raider, boss, and projectile interpolation.
 - Same-origin HTTPS/WSS production deployment.
-- Reconnectable browser membership: a short live-page transport interruption can resume the same active match, logical member, and server simulation.
-- Active-disconnect abort after the reconnect grace expires; a replacement player can then start a fresh match.
+- The PR #11 reconnect-capable server foundation and PR #12 browser reconnect machinery remain implemented and covered by automated tests.
+- Browser reconnect capability is temporarily disabled by default; ordinary production members retain immediate-disconnect behavior.
 
 ### CI and automated validation coverage
 
@@ -121,4 +121,4 @@ These are deferred scope, not necessarily defects:
 
 ## Server reconnect foundation (2026-09-02)
 
-`RaidRoom` now supports opt-in, authenticated, eight-second reconnectable membership for active matches. Membership reservations and the authoritative host are intentionally in memory only, so Durable Object runtime loss continues to fail closed rather than fabricate recovered simulation state. Browser `NetworkGameSession` now opts in with `reconnect=1`, privately retains the latest match ticket in memory, and uses bounded `resume=1` attempts to recover a live page within the advertised grace. No credential is placed in URLs, public connection information, events, or browser persistence. Reload recovery remains intentionally unsupported, and runtime loss still fails closed.
+PR #11 implemented opt-in, authenticated, eight-second reconnectable membership in `RaidRoom`; that server foundation remains intact. PR #12 implemented the browser ticket and bounded `resume=1` retry machinery, which also remains in code. After production validation found a fresh-match startup regression, the browser capability was temporarily disabled by default: production `NetworkGameSession` connections now use the ordinary member transport without `reconnect=1`, receive no resume ticket, and retain immediate-disconnect behavior. The cross-layer failure has not yet been identified. Reconnect is exercised only through an internal test option until startup is understood and proven in production. No credential is placed in URLs, public connection information, events, or browser persistence.
