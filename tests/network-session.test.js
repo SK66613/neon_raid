@@ -49,7 +49,7 @@ const frame = (matchId, tick, status = 'active', events = []) => message('state-
 test('create mode posts once, validates the response, and exposes ws URL', async () => {
   const { session, socket, calls } = await setup({ mode: 'create', roomId: null });
   assert.equal(calls.length, 1); assert.equal(calls[0][1].method, 'POST');
-  assert.equal(calls[0][0].pathname, '/api/rooms'); assert.equal(socket.url, `ws://example.test/api/rooms/${roomId}/ws?reconnect=1`);
+  assert.equal(calls[0][0].pathname, '/api/rooms'); assert.equal(socket.url, `ws://example.test/api/rooms/${roomId}/ws`);
   assert.equal(session.getConnectionInfo().roomId, roomId);
 });
 
@@ -62,7 +62,22 @@ test('malformed created room is rejected before a socket opens', async () => {
 
 test('join does not fetch and https selects wss', async () => {
   const { socket, calls } = await setup({ origin: 'https://example.test' });
-  assert.equal(calls.length, 0); assert.equal(socket.url, `wss://example.test/api/rooms/${roomId}/ws?reconnect=1`);
+  assert.equal(calls.length, 0); assert.equal(socket.url, `wss://example.test/api/rooms/${roomId}/ws`);
+});
+
+test('default startup reaches READY with two Raiders and no reconnect capability or ticket', async () => {
+  const { session, socket } = await setup();
+  assert.equal(socket.url, `ws://example.test/api/rooms/${roomId}/ws`);
+  assert.equal(session.getStatus(), SessionStatus.WAITING);
+  socket.emit('message', message('roster', { capacity: 2, players: [
+    { connectionId: 'peer-one', slot: 1 }, { connectionId: 'server-choice', slot: 2 },
+  ] }));
+  assert.equal(session.getConnectionInfo().peerCount, 2);
+  socket.emit('message', frame('startup-match', 0));
+  assert.equal(session.getStatus(), SessionStatus.READY);
+  assert.equal(session.getConnectionInfo().matchId, 'startup-match');
+  assert.deepEqual(session.getSnapshot(), snapshot(0));
+  assert.deepEqual(session.drainEvents(), []);
 });
 
 test('welcome captures authoritative slot and connection metadata while waiting', async () => {
@@ -290,7 +305,8 @@ test('death, abort, and replacement match clear old presentation state', async (
 
 test('active interruption authenticates privately, freezes, and accepts a same-tick resume sync', async () => {
   const scheduler = new FakeScheduler();
-  const { session, socket } = await setup({ scheduler });
+  const { session, socket } = await setup({ scheduler, reconnectCapable: true });
+  assert.equal(socket.url, `ws://example.test/api/rooms/${roomId}/ws?reconnect=1`);
   const token = '1'.repeat(64), rotated = '2'.repeat(64);
   socket.emit('message', message('resume-ticket', { matchId: 'm1', connectionId: 'server-choice', resumeToken: token, graceMs: 8000 }));
   socket.emit('message', frame('m1', 100));
@@ -360,7 +376,7 @@ test('active interruption authenticates privately, freezes, and accepts a same-t
 });
 
 test('resume attempts are bounded, race-safe, and expire once at the absolute deadline', async () => {
-  const scheduler = new FakeScheduler(); const { session, socket } = await setup({ scheduler });
+  const scheduler = new FakeScheduler(); const { session, socket } = await setup({ scheduler, reconnectCapable: true });
   socket.emit('message', message('resume-ticket', { matchId: 'm1', connectionId: 'server-choice', resumeToken: '3'.repeat(64), graceMs: 2000 }));
   socket.emit('message', frame('m1', 4)); socket.emit('close', {});
   const attempt1 = FakeSocket.instances[1];
@@ -380,7 +396,7 @@ test('resume attempts are bounded, race-safe, and expire once at the absolute de
 
 test('resume rejection and identity corruption fail closed without retry, while explicit close cancels retries', async () => {
   for (const corrupt of ['rejected', 'identity']) {
-    const scheduler = new FakeScheduler(); const { session, socket } = await setup({ scheduler });
+    const scheduler = new FakeScheduler(); const { session, socket } = await setup({ scheduler, reconnectCapable: true });
     socket.emit('message', message('resume-ticket', { matchId: 'm1', connectionId: 'server-choice', resumeToken: '4'.repeat(64), graceMs: 8000 }));
     socket.emit('message', frame('m1', 0)); socket.emit('close', {}); const resume = FakeSocket.instances[1]; resume.emit('open');
     if (corrupt === 'rejected') resume.emit('message', message('error', { code: 'resume-rejected', message: 'Resume rejected.' }));
@@ -388,7 +404,7 @@ test('resume rejection and identity corruption fail closed without retry, while 
     assert.equal(session.getStatus(), SessionStatus.ERROR); const count = FakeSocket.instances.length;
     scheduler.advance(10000); assert.equal(FakeSocket.instances.length, count);
   }
-  const scheduler = new FakeScheduler(); const { session, socket } = await setup({ scheduler });
+  const scheduler = new FakeScheduler(); const { session, socket } = await setup({ scheduler, reconnectCapable: true });
   socket.emit('message', message('resume-ticket', { matchId: 'm2', connectionId: 'server-choice', resumeToken: '5'.repeat(64), graceMs: 8000 }));
   socket.emit('message', frame('m2', 0)); socket.emit('close', {}); const resume = FakeSocket.instances[1];
   session.close(); assert.equal(session.getStatus(), SessionStatus.CLOSED); assert.deepEqual(resume.closeArgs, [1000, 'Session closed']);

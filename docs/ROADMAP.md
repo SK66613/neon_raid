@@ -8,12 +8,15 @@ This is the current engineering order, not a promise to implement every possible
 
 ## Next engineering order
 
-Browser resume is implemented. The next work order is:
+Browser resume is implemented but temporarily disabled by default after the 2026-09-03 production startup regression. The next work order is:
 
-1. Production validation of browser reconnect.
-2. Multiplayer diagnostics and observability.
-3. Evaluate active-match checkpoint/recovery only if production evidence shows it is needed.
-4. Telegram Mini App identity and invite layer.
+1. Restore and manually verify two-device production startup.
+2. Build a real cross-layer `RaidRoom` ↔ `NetworkGameSession` regression harness.
+3. Identify and fix the reconnect-capable startup failure without assuming a root cause.
+4. Re-enable browser reconnect only after production startup is proven.
+5. Add multiplayer diagnostics and observability.
+
+Do not proceed to Telegram until this order is complete and reliable browser multiplayer is re-established.
 
 Reload recovery remains outside the browser reconnect scope because tickets are memory-only.
 
