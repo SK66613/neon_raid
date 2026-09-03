@@ -182,6 +182,7 @@ export class NetworkGameSession extends GameSession {
     if (message.type === 'welcome') {
       if (message.roomId !== this.#info.roomId) { this.#protocolError('room-mismatch'); return; }
       if (resume) {
+        if (this.#status !== SessionStatus.RECONNECTING) { this.#protocolError('unexpected-resume-welcome'); return; }
         if (message.connectionId !== this.#info.connectionId || message.slot !== this.#info.slot
           || message.capacity !== this.#info.capacity) { this.#protocolError('resume-identity-mismatch'); return; }
         this.#resumeWelcome = true;
@@ -213,7 +214,9 @@ export class NetworkGameSession extends GameSession {
       this.#resumeTicket = null; this.#outbound = []; this.#snapshot = null; this.#resetPresentation(); this.#status = SessionStatus.WAITING;
       this.#events.push({ type: 'match-aborted', reason: message.reason });
     } else if (message.type === 'error') {
-      if (resume && message.code === 'resume-rejected') { this.#terminalDisconnect('resume-rejected'); return; }
+      if (resume && this.#status === SessionStatus.RECONNECTING && message.code === 'resume-rejected') {
+        this.#terminalDisconnect('resume-rejected'); return;
+      }
       this.#events.push({ type: 'network-error', code: message.code, message: message.message });
     }
   }
@@ -226,8 +229,9 @@ export class NetworkGameSession extends GameSession {
     if (newMatch && this.#resumeTicket && message.matchId !== this.#resumeTicket.matchId) {
       this.#protocolError('resume-ticket-match-mismatch'); return;
     }
-    const resumeSync = resume && this.#status === SessionStatus.RECONNECTING && this.#resumeWelcome;
-    if (resume && !resumeSync) { this.#protocolError('resume-sync-before-welcome'); return; }
+    const awaitingResumeSync = resume && this.#status === SessionStatus.RECONNECTING;
+    const resumeSync = awaitingResumeSync && this.#resumeWelcome;
+    if (awaitingResumeSync && !resumeSync) { this.#protocolError('resume-sync-before-welcome'); return; }
     if (resumeSync && message.tick < this.#info.lastServerTick) { this.#protocolError('stale-resume-sync'); return; }
     if (!newMatch && (message.tick < this.#info.lastServerTick
       || (message.tick === this.#info.lastServerTick && !resumeSync))) return;

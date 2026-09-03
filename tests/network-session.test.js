@@ -322,8 +322,37 @@ test('active interruption authenticates privately, freezes, and accepts a same-t
   assert.deepEqual(resume.sent.slice(1).map(item => [item.seq, item.command.type]), [[0, 'move'], [1, 'fire']]);
   assert.equal(session.getConnectionInfo().lastAckSeq, null);
 
-  resume.emit('close', {}); const secondResume = FakeSocket.instances[2]; secondResume.emit('open');
+  resume.emit('message', frame('m1', 101));
+  assert.equal(session.getStatus(), SessionStatus.READY);
+  assert.equal(session.getConnectionInfo().lastServerTick, 101);
+  assert.equal(session.getSnapshot().tick, 101);
+  assert.equal(resume.closeArgs, undefined);
+  assert.deepEqual(session.drainEvents(), []);
+  resume.emit('message', frame('m1', 101));
+  assert.equal(session.getConnectionInfo().lastServerTick, 101);
+  assert.deepEqual(session.drainEvents(), []);
+  resume.emit('message', frame('m1', 102));
+  assert.equal(session.getConnectionInfo().lastServerTick, 102);
+  assert.equal(session.getSnapshot().tick, 102);
+
+  resume.emit('close', {});
+  assert.equal(session.getStatus(), SessionStatus.RECONNECTING);
+  assert.deepEqual(session.drainEvents(), [{ type: 'network-reconnecting', graceMs: 8000 }]);
+  const secondResume = FakeSocket.instances[2]; secondResume.emit('open');
   assert.equal(secondResume.sent[0].resumeToken, rotated);
+  secondResume.emit('message', message('welcome', { roomId, connectionId: 'server-choice', slot: 2, capacity: 2 }));
+  secondResume.emit('message', message('resume-ticket', {
+    matchId: 'm1', connectionId: 'server-choice', resumeToken: '6'.repeat(64), graceMs: 8000,
+  }));
+  secondResume.emit('message', frame('m1', 102));
+  assert.equal(session.getStatus(), SessionStatus.READY);
+  assert.deepEqual(session.drainEvents(), [{ type: 'network-resumed' }]);
+  secondResume.emit('message', frame('m1', 103));
+  assert.equal(session.getStatus(), SessionStatus.READY);
+  assert.equal(session.getConnectionInfo().lastServerTick, 103);
+  assert.equal(session.getSnapshot().tick, 103);
+  assert.equal(secondResume.closeArgs, undefined);
+  assert.deepEqual(session.drainEvents(), []);
   for (const publicValue of [socket.url, resume.url, session.getConnectionInfo(), ...session.drainEvents()]) {
     assert.equal(JSON.stringify(publicValue).includes(token), false);
     assert.equal(JSON.stringify(publicValue).includes(rotated), false);
