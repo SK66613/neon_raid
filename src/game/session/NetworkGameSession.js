@@ -10,6 +10,7 @@ const HARD_SNAP_DISTANCE = 72;
 const REFLECTED_DASH_HARD_SNAP_DISTANCE = PLAYER_CONFIG.dashDistance * 0.75;
 const SOFT_CORRECTION_RATE = 14;
 const CORRECTION_EPSILON = 0.01;
+const NETWORK_TRACE_LIMIT = 32;
 const lerp = (from, to, alpha) => from + (to - from) * alpha;
 export const RECONNECT_RETRY_DELAY_MS = 250;
 export const RECONNECT_ATTEMPT_TIMEOUT_MS = 1500;
@@ -49,10 +50,14 @@ export class NetworkGameSession extends GameSession {
   #reconnectCapable = false;
   #frameWatchdogTimer = null;
   #frameWatchdogGeneration = 0;
+  #diagnosticStartedAt;
+  #networkTrace = [];
+  #reconnectSummary = null;
 
   constructor({ roomId = null, scheduler = defaultScheduler, reconnectCapable = false } = {}) {
     super();
     this.#scheduler = scheduler;
+    this.#diagnosticStartedAt = scheduler.now();
     this.#reconnectCapable = reconnectCapable;
     this.#info = { roomId, connectionId: null, slot: null, capacity: null, matchId: null,
       peerCount: 0, lastServerTick: null, lastAckSeq: null };
@@ -147,6 +152,12 @@ export class NetworkGameSession extends GameSession {
   drainEvents() { const result = copy(this.#events); this.#events = []; return result; }
   getStatus() { return this.#status; }
   getConnectionInfo() { return copy(this.#info); }
+  getNetworkDiagnostics() {
+    const summary = this.#reconnectSummary ? copy(this.#reconnectSummary) : null;
+    if (summary) summary.elapsedMs = Math.max(0, (summary.completedAt ?? this.#scheduler.now()) - summary.startedAt);
+    if (summary) { delete summary.startedAt; delete summary.completedAt; }
+    return { status: this.#status, reconnect: summary, trace: copy(this.#networkTrace) };
+  }
 
   close() {
     if (this.#status === SessionStatus.CLOSED) return;
@@ -164,13 +175,18 @@ export class NetworkGameSession extends GameSession {
     };
     listen('open', () => {
       if (socket !== this.#socket) return;
-      if (!resume) { if (this.#status === SessionStatus.CONNECTING) this.#status = SessionStatus.WAITING; return; }
+      if (!resume) { this.#trace('fresh-socket-open'); if (this.#status === SessionStatus.CONNECTING) this.#status = SessionStatus.WAITING; return; }
+      this.#reconnectSummary.attemptsOpened++;
+      this.#trace('resume-attempt-open', { attempt: this.#reconnectSummary.attemptsCreated });
       try { socket.send(JSON.stringify(createResumeMessage(this.#resumeTicket.matchId,
-        this.#resumeTicket.connectionId, this.#resumeTicket.resumeToken))); }
+        this.#resumeTicket.connectionId, this.#resumeTicket.resumeToken)));
+        this.#reconnectSummary.resumeEnvelopesSent++;
+        this.#trace('resume-envelope-sent'); }
       catch {
+        this.#trace('resume-envelope-send-failed');
         this.#socket = null;
         try { socket.close(1000, 'Resume authentication failed'); } catch {}
-        this.#attemptFailed();
+        this.#attemptFailed('send-failed');
       }
     });
     listen('message', event => { if (socket === this.#socket) this.#receive(event?.data, resume); });
@@ -191,6 +207,8 @@ export class NetworkGameSession extends GameSession {
         if (message.connectionId !== this.#info.connectionId || message.slot !== this.#info.slot
           || message.capacity !== this.#info.capacity) { this.#protocolError('resume-identity-mismatch'); return; }
         this.#resumeWelcome = true;
+        this.#reconnectSummary.welcomeReceived++;
+        this.#trace('resume-welcome');
         return;
       }
       Object.assign(this.#info, { connectionId: message.connectionId, slot: message.slot, capacity: message.capacity });
@@ -201,6 +219,10 @@ export class NetworkGameSession extends GameSession {
         this.#protocolError('resume-ticket-mismatch'); return;
       }
       this.#resumeTicket = message;
+      if (resume) {
+        this.#reconnectSummary.rotatedTicketReceived++;
+        this.#trace('resume-ticket-rotated');
+      } else this.#trace('resume-ticket-received');
     } else if (message.type === 'roster') {
       this.#info.peerCount = message.players.length;
       if (this.#status === SessionStatus.COMPLETE && message.players.length < message.capacity) {
@@ -220,6 +242,7 @@ export class NetworkGameSession extends GameSession {
       this.#events.push({ type: 'match-aborted', reason: message.reason });
     } else if (message.type === 'error') {
       if (resume && this.#status === SessionStatus.RECONNECTING && message.code === 'resume-rejected') {
+        this.#trace('resume-rejected');
         this.#terminalDisconnect('resume-rejected'); return;
       }
       this.#events.push({ type: 'network-error', code: message.code, message: message.message });
@@ -257,6 +280,8 @@ export class NetworkGameSession extends GameSession {
     this.#reconcileLocalPlayer(oldVisible, reflectedDash);
     if (!this.#localPlayerAlive()) this.#outbound = [];
     this.#info.lastServerTick = message.tick;
+    this.#trace(resumeSync ? 'resume-sync-frame' : 'authoritative-frame');
+    if (resumeSync) this.#reconnectSummary.syncFramesReceived++;
     this.#status = message.snapshot.status === 'won' || message.snapshot.status === 'lost'
       ? SessionStatus.COMPLETE : SessionStatus.READY;
     if (resumeSync) {
@@ -267,6 +292,8 @@ export class NetworkGameSession extends GameSession {
         if (this.#desired.fire) this.#outbound.push(copy(this.#desired.fire));
       }
       this.#events.push({ type: 'network-resumed' });
+      this.#trace('network-resumed');
+      this.#reconnectSummary.completedAt = this.#scheduler.now();
     }
     if (this.#status === SessionStatus.READY && message.snapshot.status === 'active') this.#armFrameWatchdog();
     if (this.#status === SessionStatus.COMPLETE) {
@@ -275,6 +302,11 @@ export class NetworkGameSession extends GameSession {
   }
 
   #protocolError(code) {
+    this.#trace('protocol-error', { code });
+    if (this.#reconnectSummary && this.#status === SessionStatus.RECONNECTING) {
+      this.#reconnectSummary.terminalReason = `protocol-error:${code}`;
+      this.#reconnectSummary.completedAt = this.#scheduler.now();
+    }
     this.#cancelFrameWatchdog(); this.#cancelReconnect(); this.#resumeTicket = null; this.#outbound = []; this.#resetPresentation(); this.#status = SessionStatus.ERROR;
     this.#events.push({ type: 'network-error', code, message: 'Invalid server protocol message.' });
     const socket = this.#socket; this.#socket = null;
@@ -285,13 +317,24 @@ export class NetworkGameSession extends GameSession {
     if (socket !== this.#socket || this.#explicitClose
       || [SessionStatus.CLOSED, SessionStatus.ERROR].includes(this.#status)) return;
     this.#cancelFrameWatchdog(); this.#socket = null;
-    if (resume && this.#status === SessionStatus.RECONNECTING) { this.#attemptFailed(socket); return; }
+    this.#trace('transport-lost', { source: reason, resume });
+    if (resume && this.#status === SessionStatus.RECONNECTING) {
+      if (reason === 'socket-error') { this.#reconnectSummary.attemptErrors++; this.#trace('resume-attempt-error'); }
+      else { this.#reconnectSummary.attemptCloses++; this.#trace('resume-attempt-close'); }
+      this.#attemptFailed(reason); return;
+    }
     const ticket = this.#resumeTicket;
     const eligible = this.#status === SessionStatus.READY && this.#info.matchId && ticket
       && ticket.matchId === this.#info.matchId && ticket.connectionId === this.#info.connectionId
       && this.#snapshot?.status === 'active';
     if (!eligible) { this.#terminalDisconnect(reason); return; }
     this.#status = SessionStatus.RECONNECTING; this.#outbound = []; this.#resetPresentation();
+    const trigger = reason === 'authoritative-frame-stalled' ? 'watchdog'
+      : reason === 'socket-error' ? 'socket-error' : reason === 'socket-closed' ? 'socket-close' : 'other';
+    this.#reconnectSummary = { trigger, attemptsCreated: 0, attemptsOpened: 0, resumeEnvelopesSent: 0,
+      welcomeReceived: 0, rotatedTicketReceived: 0, syncFramesReceived: 0, attemptErrors: 0,
+      attemptCloses: 0, attemptTimeouts: 0, startedAt: this.#scheduler.now(), completedAt: null, terminalReason: null };
+    this.#trace('reconnect-start', { trigger, graceMs: ticket.graceMs });
     this.#deadline = this.#scheduler.now() + ticket.graceMs;
     this.#events.push({ type: 'network-reconnecting', graceMs: ticket.graceMs });
     this.#deadlineTimer = this.#scheduler.setTimeout(() => this.#reconnectTimeout(), ticket.graceMs);
@@ -303,16 +346,20 @@ export class NetworkGameSession extends GameSession {
     if (this.#scheduler.now() >= this.#deadline) { this.#reconnectTimeout(); return; }
     const url = new URL(`/api/rooms/${encodeURIComponent(this.#info.roomId)}/ws`, this.#origin);
     url.searchParams.set('resume', '1'); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    this.#reconnectSummary.attemptsCreated++;
+    this.#trace('resume-attempt-created', { attempt: this.#reconnectSummary.attemptsCreated });
     let socket;
-    try { socket = new this.#WebSocketImpl(url.href); }
-    catch { this.#scheduleRetry(); return; }
+    try { socket = new this.#WebSocketImpl(url.href); this.#trace('resume-socket-constructed'); }
+    catch { this.#trace('resume-socket-constructor-failed'); this.#scheduleRetry(); return; }
     this.#socket = socket; this.#resumeWelcome = false; this.#wireSocket(socket, true);
     const remaining = this.#deadline - this.#scheduler.now();
     this.#attemptTimer = this.#scheduler.setTimeout(() => {
       if (socket !== this.#socket || this.#status !== SessionStatus.RECONNECTING) return;
       this.#socket = null;
+      this.#reconnectSummary.attemptTimeouts++;
+      this.#trace('resume-attempt-timeout');
       try { socket.close(1000, 'Resume attempt timed out'); } catch {}
-      this.#attemptFailed(socket);
+      this.#attemptFailed('timeout');
     }, Math.min(RECONNECT_ATTEMPT_TIMEOUT_MS, remaining));
   }
 
@@ -326,13 +373,19 @@ export class NetworkGameSession extends GameSession {
     if (this.#status !== SessionStatus.RECONNECTING || this.#explicitClose || this.#retryTimer !== null) return;
     const remaining = this.#deadline - this.#scheduler.now();
     if (remaining <= 0) { this.#reconnectTimeout(); return; }
+    const delayMs = Math.min(RECONNECT_RETRY_DELAY_MS, remaining);
+    this.#trace('resume-retry-scheduled', { delayMs });
     this.#retryTimer = this.#scheduler.setTimeout(() => {
       this.#retryTimer = null; this.#openResumeAttempt();
-    }, Math.min(RECONNECT_RETRY_DELAY_MS, remaining));
+    }, delayMs);
   }
 
   #reconnectTimeout() {
     if (this.#status !== SessionStatus.RECONNECTING) return;
+    this.#trace('reconnect-timeout');
+    this.#trace('terminal-disconnect', { reason: 'reconnect-timeout' });
+    this.#reconnectSummary.terminalReason = 'reconnect-timeout';
+    this.#reconnectSummary.completedAt = this.#scheduler.now();
     const socket = this.#socket; this.#socket = null;
     this.#cancelFrameWatchdog(); this.#cancelReconnect(); this.#resumeTicket = null; this.#outbound = []; this.#resetPresentation();
     try { socket?.close(1000, 'Reconnect timeout'); } catch {}
@@ -342,6 +395,11 @@ export class NetworkGameSession extends GameSession {
 
   #terminalDisconnect(reason) {
     if ([SessionStatus.ERROR, SessionStatus.CLOSED].includes(this.#status)) return;
+    this.#trace('terminal-disconnect', { reason });
+    if (this.#reconnectSummary) {
+      this.#reconnectSummary.terminalReason = reason;
+      this.#reconnectSummary.completedAt = this.#scheduler.now();
+    }
     const socket = this.#socket; this.#socket = null;
     this.#cancelFrameWatchdog(); this.#cancelReconnect(); this.#resumeTicket = null; this.#outbound = []; this.#resetPresentation();
     try { socket?.close(1000, 'Disconnected'); } catch {}
@@ -367,6 +425,7 @@ export class NetworkGameSession extends GameSession {
       if (generation !== this.#frameWatchdogGeneration || socket !== this.#socket
         || this.#status !== SessionStatus.READY || !this.#info.matchId
         || this.#snapshot?.status !== 'active' || !this.#reconnectCapable) return;
+      this.#trace('watchdog-stalled');
       this.#transportLost(socket, false, 'authoritative-frame-stalled');
       try { socket.close(1000, 'Authoritative frame stalled'); } catch {}
     }, AUTHORITATIVE_FRAME_STALL_MS);
@@ -427,6 +486,13 @@ export class NetworkGameSession extends GameSession {
   #resetPresentation() {
     this.#previousFrame = null; this.#currentFrame = null; this.#interpolationElapsed = 0;
     this.#predictedPlayer = null; this.#correction = { x: 0, y: 0 }; this.#sentMovement = [];
+  }
+
+  #trace(stage, detail = undefined) {
+    const entry = { t: Math.max(0, this.#scheduler.now() - this.#diagnosticStartedAt), stage };
+    if (detail !== undefined) entry.detail = copy(detail);
+    this.#networkTrace.push(entry);
+    if (this.#networkTrace.length > NETWORK_TRACE_LIMIT) this.#networkTrace.splice(0, this.#networkTrace.length - NETWORK_TRACE_LIMIT);
   }
 
   #fail(message) { this.#status = SessionStatus.ERROR; return new Error(message); }

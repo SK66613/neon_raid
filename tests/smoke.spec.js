@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 test('public co-op composition enables reconnect capability', () => {
   const gameSource = readFileSync(new URL('../src/game/Game.js', import.meta.url), 'utf8');
   expect(gameSource).toMatch(/createNetworkGameSession\(\{[^}]*reconnectCapable: true,/s);
+  expect(gameSource).toContain('NETWORK DISCONNECTED — ${reason}${trigger}${counts}');
+  expect(gameSource).toContain('A${diagnostic.attemptsCreated}/O${diagnostic.attemptsOpened}/W${diagnostic.welcomeReceived}/S${diagnostic.syncFramesReceived}');
+  expect(gameSource).toContain('window.__NEON_NETWORK_DEBUG=()=>session.getNetworkDiagnostics()');
 });
 
 test('v0.5 boots, plays Stage 1, and enters the Warden-X fight', async ({ page }) => {
